@@ -1,7 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
 
-// No API keys here — they live in .env.local (local) or Vercel dashboard (production)
-
 const MIN_MC    = 1_000_000;
 const MAX_MC    = 10_000_000;
 const MIN_VOL   = 400_000;
@@ -14,21 +12,29 @@ const CG_CATS = [
   { id:"infra", label:"Infrastructure", cgId:"infrastructure",             color:"#8b5cf6" },
 ];
 
+// Different sort orders + pages = genuinely different coins every scan
+const CG_SORT_ORDERS = [
+  "market_cap_asc",
+  "market_cap_desc",
+  "volume_asc",
+  "volume_desc",
+  "id_asc",
+  "id_desc",
+];
+
 const SORT_OPTIONS = [
-  { value:"shuffle", label:"Shuffled (random)"  },
-  { value:"otc",     label:"OTC Score"           },
-  { value:"mc_asc",  label:"Market Cap ↑"        },
-  { value:"mc_desc", label:"Market Cap ↓"        },
-  { value:"vol",     label:"Volume ↓"            },
-  { value:"change",  label:"24h Change"          },
+  { value:"default",  label:"As fetched (varied)" },
+  { value:"otc",      label:"OTC Score"            },
+  { value:"mc_asc",   label:"Market Cap ↑"         },
+  { value:"mc_desc",  label:"Market Cap ↓"         },
+  { value:"vol",      label:"Volume ↓"             },
+  { value:"change",   label:"24h Change"           },
 ];
 
 // ── localStorage helpers ───────────────────────────────────────────
 function lsGet(key, fallback) {
-  try {
-    const v = localStorage.getItem(key);
-    return v ? JSON.parse(v) : fallback;
-  } catch { return fallback; }
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
 }
 function lsSet(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
@@ -43,6 +49,8 @@ function shuffle(arr) {
   }
   return a;
 }
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 // ── theme ──────────────────────────────────────────────────────────
 function Th(dark) {
@@ -98,11 +106,13 @@ function projectURL(coin){
   return `https://www.coingecko.com/en/coins/${coin.rawId}`;
 }
 
-// ── API ────────────────────────────────────────────────────────────
+// ── API — random sort order + random page each call ────────────────
 async function fetchCG(cat) {
+  const order = pick(CG_SORT_ORDERS);
+  const page  = pick([1, 2]); // fetch page 1 or 2 randomly
   const qs = new URLSearchParams({
     vs_currency:"usd", category:cat.cgId,
-    order:"market_cap_asc", per_page:"250", page:"1",
+    order, per_page:"250", page:String(page),
     sparkline:"false", price_change_percentage:"24h",
   }).toString();
   const res = await fetch(`/api/coingecko?${qs}`);
@@ -120,8 +130,11 @@ async function fetchCG(cat) {
 }
 
 async function fetchCMC() {
+  // randomly offset CMC results too
+  const start = pick([1, 51, 101, 151, 201]);
   const qs = new URLSearchParams({
-    limit:"500", convert:"USD", sort:"date_added", sort_dir:"desc",
+    limit:"200", start:String(start), convert:"USD",
+    sort:"date_added", sort_dir:"desc",
   }).toString();
   const res = await fetch(`/api/cmc?${qs}`);
   if(!res.ok){
@@ -246,41 +259,55 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
 
 // ── main ───────────────────────────────────────────────────────────
 export default function App(){
-  const [dark,      setDark]      = useState(()=>lsGet("otc_dark", false));
-  const [sideOpen,  setSideOpen]  = useState(false);
+  const [dark,      setDark]     = useState(()=>lsGet("otc_dark",false));
+  const [sideOpen,  setSideOpen] = useState(false);
+  const [allCoins,  setAllCoins] = useState(()=>lsGet("otc_coins",[]));
+  const [errors,    setErrors]   = useState(()=>lsGet("otc_errors",[]));
+  const [lastScan,  setLastScan] = useState(()=>{ const v=lsGet("otc_lastscan",null); return v?new Date(v):null; });
+  const [newAlerts, setNewAlerts]= useState(()=>lsGet("otc_alerts",[]));
 
-  // ── persisted state (survives refresh) ──
-  const [allCoins,  setAllCoinsRaw]  = useState(()=>lsGet("otc_coins", []));
-  const [watchlist, setWatchlistRaw] = useState(()=>new Set(lsGet("otc_watchlist", [])));
-  const [errors,    setErrors]    = useState(()=>lsGet("otc_errors", []));
-  const [lastScan,  setLastScanRaw] = useState(()=>{ const v=lsGet("otc_lastscan",null); return v?new Date(v):null; });
-  const [newAlerts, setNewAlertsRaw]= useState(()=>lsGet("otc_alerts",[]));
+  // ── watchlist stores FULL coin objects, not just IDs ──────────────
+  // Map: id → coin object
+  const [watchMap, setWatchMapRaw] = useState(()=>{
+    const saved = lsGet("otc_watchmap", []);
+    return new Map(saved);
+  });
 
-  // wrap setters to also persist
-  const setAllCoins = val => { setAllCoinsRaw(val); lsSet("otc_coins", val); };
-  const setWatchlist = fn => {
-    setWatchlistRaw(prev => {
+  const setWatchMap = fn => {
+    setWatchMapRaw(prev => {
       const next = typeof fn === "function" ? fn(prev) : fn;
-      lsSet("otc_watchlist", [...next]);
+      lsSet("otc_watchmap", [...next.entries()]);
       return next;
     });
   };
-  const setLastScan = val => { setLastScanRaw(val); lsSet("otc_lastscan", val?.toISOString()||null); };
-  const setNewAlerts = val => { setNewAlertsRaw(val); lsSet("otc_alerts", val); };
 
-  const [page,      setPage]      = useState(0);
-  const [activeTab, setActiveTab] = useState("all");
-  const [sortBy,    setSortBy]    = useState("shuffle");
-  const [scanning,  setScanning]  = useState(false);
-  const [progress,  setProgress]  = useState("");
-  const [modalCoin, setModalCoin] = useState(null);
+  const [page,      setPage]     = useState(0);
+  const [activeTab, setActiveTab]= useState("all");
+  const [sortBy,    setSortBy]   = useState("default");
+  const [scanning,  setScanning] = useState(false);
+  const [progress,  setProgress] = useState("");
+  const [modalCoin, setModalCoin]= useState(null);
 
-  // persist dark mode
-  useEffect(()=>{ lsSet("otc_dark", dark); },[dark]);
+  useEffect(()=>{ lsSet("otc_dark",dark); },[dark]);
+
+  // persisted setters
+  const saveCoins = val => { setAllCoins(val); lsSet("otc_coins",val); };
+  const saveErrors = val => { setErrors(val); lsSet("otc_errors",val); };
+  const saveAlerts = val => { setNewAlerts(val); lsSet("otc_alerts",val); };
+  const saveLastScan = val => { setLastScan(val); lsSet("otc_lastscan",val?.toISOString()||null); };
+
+  const toggleWatch = (id, coinObj) => {
+    setWatchMap(prev => {
+      const next = new Map(prev);
+      if(next.has(id)) next.delete(id);
+      else if(coinObj) next.set(id, coinObj);
+      return next;
+    });
+  };
 
   const scan=useCallback(async()=>{
     if(scanning) return;
-    setScanning(true); setErrors([]); setNewAlerts([]); setAllCoins([]);
+    setScanning(true); saveErrors([]); saveAlerts([]); saveCoins([]);
     const fetched=[],errs=[];
 
     for(let i=0;i<CG_CATS.length;i++){
@@ -302,41 +329,30 @@ export default function App(){
         fetched.push(c);
         if(c.isNew) newOnes.push(c);
       }
-      if(newOnes.length) setNewAlerts(newOnes.slice(0,10));
+      if(newOnes.length) saveAlerts(newOnes.slice(0,10));
     }catch(e){ errs.push(`CMC: ${e.message}`); }
 
-    // deduplicate
+    // deduplicate then shuffle
     const seen=new Set();
     const deduped=fetched.filter(c=>{if(seen.has(c.rawId))return false;seen.add(c.rawId);return true;});
+    const result=shuffle(deduped);
 
-    // always shuffle so every scan feels different
-    const shuffled=shuffle(deduped);
-
-    setAllCoins(shuffled);
+    saveCoins(result);
     setPage(0);
-    setErrors(errs);
-    setLastScan(new Date());
+    saveErrors(errs);
+    saveLastScan(new Date());
     setProgress("");
     setScanning(false);
   },[scanning]);
 
-  // clear scan results only — watchlist untouched
-  const clearScan = () => {
-    setAllCoins([]);
-    setPage(0);
-    setErrors([]);
-    setNewAlerts([]);
-    setLastScan(null);
-    lsSet("otc_coins",[]);
-    lsSet("otc_errors",[]);
-    lsSet("otc_alerts",[]);
-    lsSet("otc_lastscan",null);
+  const clearScan=()=>{
+    saveCoins([]); saveErrors([]); saveAlerts([]); saveLastScan(null); setPage(0);
   };
 
-  // clear watchlist only
-  const clearWatchlist = () => {
-    setWatchlist(new Set());
-  };
+  const clearWatchlist=()=>setWatchMap(new Map());
+
+  // For display: watchlist tab uses watchMap values, other tabs use allCoins
+  const watchCoins = [...watchMap.values()];
 
   const tabs=[
     {id:"all",   label:"All projects",   count:allCoins.length},
@@ -345,17 +361,17 @@ export default function App(){
     {id:"meme",  label:"Memes",          count:allCoins.filter(c=>c.cat==="meme").length,  color:"#f59e0b"},
     {id:"infra", label:"Infrastructure", count:allCoins.filter(c=>c.cat==="infra").length, color:"#8b5cf6"},
     {id:"new",   label:"New Listings",   count:allCoins.filter(c=>c.isNew).length,         color:"#ef4444"},
-    {id:"watch", label:"Watchlist",      count:watchlist.size},
+    {id:"watch", label:"Watchlist",      count:watchCoins.length},
   ];
 
   const filtered=(()=>{
     let list=
-      activeTab==="watch" ? allCoins.filter(c=>watchlist.has(c.id)) :
+      activeTab==="watch" ? watchCoins :
       activeTab==="new"   ? allCoins.filter(c=>c.isNew) :
       activeTab==="all"   ? allCoins :
       allCoins.filter(c=>c.cat===activeTab);
 
-    if(sortBy==="shuffle") return list; // already shuffled at scan time
+    if(sortBy==="default") return list;
     return [...list].sort((a,b)=>{
       if(sortBy==="otc")     return otcScore(b.mc,b.vol)-otcScore(a.mc,a.vol);
       if(sortBy==="mc_asc")  return a.mc-b.mc;
@@ -369,7 +385,6 @@ export default function App(){
   const pageStart=page*PAGE_SIZE;
   const visible=filtered.slice(pageStart,pageStart+PAGE_SIZE);
   const hasMore=pageStart+PAGE_SIZE<filtered.length;
-  const toggleWatch=id=>setWatchlist(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const selectTab=id=>{setActiveTab(id);setPage(0);setSideOpen(false);};
   const theme=Th(dark);
 
@@ -411,6 +426,58 @@ export default function App(){
     </>
   );
 
+  // Render a coin row (shared between table body and modal trigger)
+  const renderRow=(coin,i,arr)=>{
+    const chg=coin.change24h||0,vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
+    const sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark);
+    const cat=catInfo(coin.cat),isW=watchMap.has(coin.id);
+    return(
+      <tr key={coin.id} onClick={()=>setModalCoin(coin)}
+        style={{borderBottom:i<arr.length-1?`1px solid ${theme.border}`:"none",cursor:"pointer",transition:"background 0.1s"}}
+        onMouseEnter={e=>e.currentTarget.style.background=theme.bgHov}
+        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+        <td style={{padding:"11px 12px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:9}}>
+            <img src={coin.image} alt="" width={26} height={26} style={{borderRadius:"50%",flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:theme.text,display:"flex",alignItems:"center",gap:5}}>
+                {coin.name}
+                {coin.isNew&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:dark?"#1a0808":"#fff5f5",color:"#ef4444",border:"1px solid #ef444430",animation:"pulse 2s infinite"}}>NEW</span>}
+              </div>
+              <div style={{fontSize:10,color:theme.textDim,marginTop:1}}>{coin.symbol}</div>
+            </div>
+          </div>
+        </td>
+        <td style={{padding:"11px 12px"}}>
+          <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:coin.source==="CMC"?(dark?"#1a0a30":"#f5f3ff"):(dark?"#0a1a2e":"#eff6ff"),color:coin.source==="CMC"?"#8b5cf6":"#3b82f6",border:`1px solid ${coin.source==="CMC"?"#8b5cf630":"#3b82f630"}`}}>
+            {coin.source==="CMC"?"CMC":"CG"}
+          </span>
+        </td>
+        <td style={{padding:"11px 12px",fontSize:13,fontWeight:500,color:theme.text}}>{fmtUSD(coin.mc)}</td>
+        <td style={{padding:"11px 12px",fontSize:13,color:theme.textMid}}>{fmtPrice(coin.price)}</td>
+        <td style={{padding:"11px 12px",fontSize:13,fontWeight:700,color:chg>=0?"#22c55e":"#ef4444"}}>{(chg>=0?"+":"")+chg.toFixed(1)+"%"}</td>
+        <td style={{padding:"11px 12px",fontSize:13,color:theme.textMid}}>{fmtUSD(coin.vol)}</td>
+        <td style={{padding:"11px 12px",fontSize:12,color:theme.textDim}}>{vr!=="—"?vr+"%":"—"}</td>
+        <td style={{padding:"11px 12px"}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:5,background:cat.color+"18",color:cat.color,border:`1px solid ${cat.color}30`,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:cat.color,flexShrink:0}}/>{cat.label}
+          </span>
+        </td>
+        <td style={{padding:"11px 12px"}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:5,background:si.bg,color:si.text,borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:700}}>
+            <span style={{width:6,height:6,borderRadius:"50%",background:si.dot,flexShrink:0}}/>{si.label} {sc}/6
+          </span>
+        </td>
+        <td style={{padding:"11px 12px"}} onClick={e=>e.stopPropagation()}>
+          <button onClick={e=>{e.stopPropagation();toggleWatch(coin.id,coin);}}
+            style={{padding:"5px 11px",borderRadius:7,border:`1px solid ${isW?theme.accent+"50":theme.border}`,background:isW?theme.accentBg:"transparent",color:isW?theme.accentTxt:theme.textDim,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>
+            {isW?"✓ Saved":"Save"}
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
   return(
     <div style={{minHeight:"100vh",background:theme.bg,color:theme.text,fontFamily:"'DM Sans',system-ui,sans-serif",display:"flex",transition:"background 0.2s,color 0.2s"}}>
       <style>{`
@@ -432,7 +499,7 @@ export default function App(){
         @media(max-width:640px){.desk-tbl{display:none!important}.mob-cards{display:block!important}}
       `}</style>
 
-      {modalCoin&&<ProjectModal coin={modalCoin} dark={dark} onClose={()=>setModalCoin(null)} onToggleWatch={toggleWatch} isWatched={watchlist.has(modalCoin.id)}/>}
+      {modalCoin&&<ProjectModal coin={modalCoin} dark={dark} onClose={()=>setModalCoin(null)} onToggleWatch={(id)=>toggleWatch(id,modalCoin)} isWatched={watchMap.has(modalCoin.id)}/>}
 
       <aside className="d-side" style={{width:220,background:theme.bgSide,borderRight:`1px solid ${theme.border}`,flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto",transition:"background 0.2s"}}>
         <SidebarInner/>
@@ -467,7 +534,7 @@ export default function App(){
                 :<svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
               }
             </button>
-            {allCoins.length>0&&(
+            {visible.length>0&&(
               <button onClick={()=>exportCSV(visible)} style={{padding:"7px 13px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1px solid ${theme.border}`,background:theme.bgCard,color:theme.textMid,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 Export CSV
@@ -485,7 +552,6 @@ export default function App(){
               <strong>Notices:</strong> {errors.join(" · ")}
             </div>
           )}
-
           {newAlerts.length>0&&(
             <div style={{background:dark?"#1a0808":"#fff5f5",border:"1px solid #ef444430",borderRadius:10,padding:"14px 16px",marginBottom:16,animation:"fadeUp 0.3s ease"}}>
               <div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
@@ -497,14 +563,13 @@ export default function App(){
               </div>
             </div>
           )}
-
           {allCoins.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:20,animation:"fadeUp 0.3s ease"}}>
               {[
                 {label:"Total found",  value:allCoins.length,                                       sub:"after all filters", accent:"#6366f1"},
                 {label:"Strong OTC",   value:allCoins.filter(c=>otcScore(c.mc,c.vol)>=5).length,    sub:"score 5–6 / 6",    accent:"#22c55e"},
                 {label:"New listings", value:allCoins.filter(c=>c.isNew).length,                    sub:"last 30 days",     accent:"#ef4444"},
-                {label:"Watchlist",    value:watchlist.size,                                         sub:"saved projects",   accent:"#f59e0b"},
+                {label:"Watchlist",    value:watchCoins.length,                                      sub:"saved projects",   accent:"#f59e0b"},
               ].map(s=>(
                 <div key={s.label} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:"14px 16px",borderTop:`3px solid ${s.accent}`,transition:"background 0.2s"}}>
                   <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>{s.label}</div>
@@ -514,25 +579,25 @@ export default function App(){
               ))}
             </div>
           )}
-
-          {/* Sort + controls bar */}
-          {filtered.length>0&&(
+          {(filtered.length>0||(activeTab==="watch"&&watchCoins.length===0))&&(
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-              <span style={{fontSize:12,color:theme.textDim}}>Sort by</span>
-              <select value={sortBy} onChange={e=>{setSortBy(e.target.value);setPage(0);}} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:theme.textMid,cursor:"pointer"}}>
-                {SORT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <span style={{fontSize:11,color:theme.textDim}}>· Click any row to view details</span>
-              <span style={{marginLeft:"auto",fontSize:12,color:theme.textDim}}>{Math.min(pageStart+1,filtered.length)}–{Math.min(pageStart+PAGE_SIZE,filtered.length)} of {filtered.length}</span>
-
-              {/* Watchlist tab — clear watchlist button */}
-              {activeTab==="watch"&&watchlist.size>0&&(
+              {activeTab!=="watch"&&(
+                <>
+                  <span style={{fontSize:12,color:theme.textDim}}>Sort by</span>
+                  <select value={sortBy} onChange={e=>{setSortBy(e.target.value);setPage(0);}} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:theme.textMid,cursor:"pointer"}}>
+                    {SORT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <span style={{fontSize:11,color:theme.textDim}}>· Click any row to view</span>
+                </>
+              )}
+              <span style={{marginLeft:"auto",fontSize:12,color:theme.textDim}}>
+                {filtered.length>0?`${Math.min(pageStart+1,filtered.length)}–${Math.min(pageStart+PAGE_SIZE,filtered.length)} of ${filtered.length}`:""}
+              </span>
+              {activeTab==="watch"&&watchCoins.length>0&&(
                 <button onClick={clearWatchlist} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #ef444430",background:dark?"#1a0808":"#fff5f5",color:"#ef4444",fontSize:12,cursor:"pointer",fontWeight:600}}>
                   Clear watchlist
                 </button>
               )}
-
-              {/* All other tabs — clear scan button */}
               {activeTab!=="watch"&&allCoins.length>0&&(
                 <button onClick={clearScan} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textMid,fontSize:12,cursor:"pointer",fontWeight:600}}>
                   Clear scan
@@ -541,20 +606,19 @@ export default function App(){
             </div>
           )}
 
-          {/* Empty state */}
-          {!scanning&&allCoins.length===0&&(
+          {!scanning&&allCoins.length===0&&activeTab!=="watch"&&(
             <div style={{textAlign:"center",padding:"80px 20px",animation:"fadeUp 0.3s ease"}}>
               <div style={{width:56,height:56,borderRadius:14,background:theme.accentBg,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke={theme.accent} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </div>
               <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>Ready to scan</div>
-              <div style={{fontSize:13,color:theme.textDim,maxWidth:300,margin:"0 auto",lineHeight:1.7}}>
-                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects. Each scan brings a different random selection.
+              <div style={{fontSize:13,color:theme.textDim,maxWidth:320,margin:"0 auto",lineHeight:1.7}}>
+                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects. Each scan uses a different sort order and page so you get genuinely different results every time.
               </div>
             </div>
           )}
 
-          {activeTab==="watch"&&watchlist.size===0&&(
+          {activeTab==="watch"&&watchCoins.length===0&&(
             <div style={{textAlign:"center",padding:"60px 0",color:theme.textDim,fontSize:13}}>No saved projects — click any row then Save to Watchlist.</div>
           )}
 
@@ -570,56 +634,7 @@ export default function App(){
                       ))}
                     </tr>
                   </thead>
-                  <tbody>
-                    {visible.map((coin,i)=>{
-                      const chg=coin.change24h||0,vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
-                      const sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark);
-                      const cat=catInfo(coin.cat),isW=watchlist.has(coin.id);
-                      return(
-                        <tr key={coin.id} onClick={()=>setModalCoin(coin)} style={{borderBottom:i<visible.length-1?`1px solid ${theme.border}`:"none",cursor:"pointer",transition:"background 0.1s"}}
-                          onMouseEnter={e=>e.currentTarget.style.background=theme.bgHov}
-                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                          <td style={{padding:"11px 12px"}}>
-                            <div style={{display:"flex",alignItems:"center",gap:9}}>
-                              <img src={coin.image} alt="" width={26} height={26} style={{borderRadius:"50%",flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
-                              <div>
-                                <div style={{fontSize:13,fontWeight:600,color:theme.text,display:"flex",alignItems:"center",gap:5}}>
-                                  {coin.name}
-                                  {coin.isNew&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:dark?"#1a0808":"#fff5f5",color:"#ef4444",border:"1px solid #ef444430",animation:"pulse 2s infinite"}}>NEW</span>}
-                                </div>
-                                <div style={{fontSize:10,color:theme.textDim,marginTop:1}}>{coin.symbol}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{padding:"11px 12px"}}>
-                            <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:coin.source==="CMC"?(dark?"#1a0a30":"#f5f3ff"):(dark?"#0a1a2e":"#eff6ff"),color:coin.source==="CMC"?"#8b5cf6":"#3b82f6",border:`1px solid ${coin.source==="CMC"?"#8b5cf630":"#3b82f630"}`}}>
-                              {coin.source==="CMC"?"CMC":"CG"}
-                            </span>
-                          </td>
-                          <td style={{padding:"11px 12px",fontSize:13,fontWeight:500,color:theme.text}}>{fmtUSD(coin.mc)}</td>
-                          <td style={{padding:"11px 12px",fontSize:13,color:theme.textMid}}>{fmtPrice(coin.price)}</td>
-                          <td style={{padding:"11px 12px",fontSize:13,fontWeight:700,color:chg>=0?"#22c55e":"#ef4444"}}>{(chg>=0?"+":"")+chg.toFixed(1)+"%"}</td>
-                          <td style={{padding:"11px 12px",fontSize:13,color:theme.textMid}}>{fmtUSD(coin.vol)}</td>
-                          <td style={{padding:"11px 12px",fontSize:12,color:theme.textDim}}>{vr!=="—"?vr+"%":"—"}</td>
-                          <td style={{padding:"11px 12px"}}>
-                            <span style={{display:"inline-flex",alignItems:"center",gap:5,background:cat.color+"18",color:cat.color,border:`1px solid ${cat.color}30`,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700}}>
-                              <span style={{width:5,height:5,borderRadius:"50%",background:cat.color,flexShrink:0}}/>{cat.label}
-                            </span>
-                          </td>
-                          <td style={{padding:"11px 12px"}}>
-                            <span style={{display:"inline-flex",alignItems:"center",gap:5,background:si.bg,color:si.text,borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:700}}>
-                              <span style={{width:6,height:6,borderRadius:"50%",background:si.dot,flexShrink:0}}/>{si.label} {sc}/6
-                            </span>
-                          </td>
-                          <td style={{padding:"11px 12px"}} onClick={e=>e.stopPropagation()}>
-                            <button onClick={e=>{e.stopPropagation();toggleWatch(coin.id);}} style={{padding:"5px 11px",borderRadius:7,border:`1px solid ${isW?theme.accent+"50":theme.border}`,background:isW?theme.accentBg:"transparent",color:isW?theme.accentTxt:theme.textDim,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>
-                              {isW?"✓ Saved":"Save"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
+                  <tbody>{visible.map((coin,i)=>renderRow(coin,i,visible))}</tbody>
                 </table>
               </div>
               <div style={{padding:"12px 16px",borderTop:`1px solid ${theme.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
@@ -636,7 +651,7 @@ export default function App(){
           {visible.length>0&&(
             <div className="mob-cards">
               {visible.map(coin=>{
-                const chg=coin.change24h||0,sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark),cat=catInfo(coin.cat);
+                const chg=coin.change24h||0,sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark),cat=catInfo(coin.cat),isW=watchMap.has(coin.id);
                 return(
                   <div key={coin.id} onClick={()=>setModalCoin(coin)} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:14,marginBottom:10,cursor:"pointer",transition:"border-color 0.15s"}}
                     onMouseEnter={e=>e.currentTarget.style.borderColor=theme.accent+"60"}
@@ -665,7 +680,9 @@ export default function App(){
                       <span style={{display:"inline-flex",alignItems:"center",gap:5,background:cat.color+"18",color:cat.color,border:`1px solid ${cat.color}30`,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700}}>
                         <span style={{width:5,height:5,borderRadius:"50%",background:cat.color}}/>{cat.label}
                       </span>
-                      <span style={{fontSize:11,color:theme.textDim}}>Tap for details →</span>
+                      <button onClick={e=>{e.stopPropagation();toggleWatch(coin.id,coin);}} style={{padding:"5px 12px",borderRadius:7,border:`1px solid ${isW?theme.accent+"50":theme.border}`,background:isW?theme.accentBg:"transparent",color:isW?theme.accentTxt:theme.textDim,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                        {isW?"✓ Saved":"Save"}
+                      </button>
                     </div>
                   </div>
                 );
