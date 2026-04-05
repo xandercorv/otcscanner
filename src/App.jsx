@@ -267,7 +267,9 @@ export default function App(){
       if(newOnes.length) setNewAlerts(newOnes.slice(0,10));
     }catch(e){ errs.push(`CMC: ${e.message}`); }
     const seen=new Set();
-    setAllCoins(fetched.filter(c=>{if(seen.has(c.rawId))return false;seen.add(c.rawId);return true;}));
+    const deduped = fetched.filter(c=>{if(seen.has(c.rawId))return false;seen.add(c.rawId);return true;});
+    const shuffled = deduped.sort(() => Math.random() - 0.5);
+    setAllCoins(shuffled);
     setPage(0); setErrors(errs); setLastScan(new Date());
     setProgress(""); setScanning(false);
   },[scanning]);
