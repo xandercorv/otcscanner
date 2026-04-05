@@ -1,13 +1,6 @@
 import { useState, useCallback } from "react";
 
-// ═══════════════════════════════════════════════════════════════════
-//  ✏️  PASTE YOUR API KEYS HERE — then save the file
-// ═══════════════════════════════════════════════════════════════════
-const CONFIG = {
-  COINGECKO_KEY: "CG-9Kwdxg3gFF4btQXSQRxbqfV9",   // free at coingecko.com/en/api
-  CMC_KEY:       "ac8d270e35bc41428ab1d5705d688bf5",          // free at pro.coinmarketcap.com
-};
-// ═══════════════════════════════════════════════════════════════════
+// No API keys here — they live in .env.local (local) or Vercel dashboard (production)
 
 const MIN_MC    = 1_000_000;
 const MAX_MC    = 10_000_000;
@@ -29,32 +22,28 @@ const SORT_OPTIONS = [
   { value:"change",  label:"24h Change"   },
 ];
 
-// ── theme ──────────────────────────────────────────────────────────
-function T(dark) {
+function Th(dark) {
   return dark ? {
     bg:"#0f0f1a", bgSide:"#0a0a14", bgCard:"#13131f", bgHov:"#1a1a2e",
-    bgInput:"#0a0a14", border:"#1e1e35", borderMid:"#2a2a45",
+    border:"#1e1e35", borderMid:"#2a2a45",
     text:"#e8e8ff", textMid:"#9090c0", textDim:"#4a4a6a",
     accent:"#6366f1", accentBg:"#6366f115", accentTxt:"#a5b4fc",
     navAct:"#6366f118", navActTxt:"#a5b4fc",
     statBg:"#0d0d1a", headerBg:"#0a0a14",
-    shadow:"0 1px 3px rgba(0,0,0,0.5)", overlay:"rgba(0,0,0,0.75)",
-    modalBg:"#13131f",
+    shadow:"0 1px 3px rgba(0,0,0,0.5)", overlay:"rgba(0,0,0,0.75)", modalBg:"#13131f",
   } : {
     bg:"#f5f5f8", bgSide:"#ffffff", bgCard:"#ffffff", bgHov:"#f9f9fc",
-    bgInput:"#ffffff", border:"#e8e8f0", borderMid:"#d0d0e0",
+    border:"#e8e8f0", borderMid:"#d0d0e0",
     text:"#111827", textMid:"#6b7280", textDim:"#9ca3af",
     accent:"#6366f1", accentBg:"#6366f110", accentTxt:"#6366f1",
     navAct:"#6366f110", navActTxt:"#6366f1",
     statBg:"#f9f9fc", headerBg:"#ffffff",
-    shadow:"0 1px 3px rgba(0,0,0,0.07)", overlay:"rgba(0,0,0,0.5)",
-    modalBg:"#ffffff",
+    shadow:"0 1px 3px rgba(0,0,0,0.07)", overlay:"rgba(0,0,0,0.5)", modalBg:"#ffffff",
   };
 }
 
-// ── helpers ────────────────────────────────────────────────────────
 const fmtUSD = n => {
-  if (!n && n!==0) return "—";
+  if (!n&&n!==0) return "—";
   if (n>=1e9) return "$"+(n/1e9).toFixed(2)+"B";
   if (n>=1e6) return "$"+(n/1e6).toFixed(2)+"M";
   if (n>=1e3) return "$"+(n/1e3).toFixed(1)+"K";
@@ -66,38 +55,34 @@ const fmtPrice = n => {
   if (n>=0.01) return "$"+n.toFixed(4);
   return "$"+n.toExponential(2);
 };
-function otcScore(mc,vol) {
+function otcScore(mc,vol){
   let s=0;
-  if (mc>=MIN_MC&&mc<=MAX_MC)         s+=3;
-  if (vol>=MIN_VOL)                   s+=1;
-  if (vol>0&&mc>0&&vol/mc<0.1)       s+=1;
-  if (mc<5_000_000)                  s+=1;
+  if(mc>=MIN_MC&&mc<=MAX_MC) s+=3;
+  if(vol>=MIN_VOL)           s+=1;
+  if(vol>0&&mc>0&&vol/mc<0.1) s+=1;
+  if(mc<5_000_000)           s+=1;
   return Math.min(s,6);
 }
-function scoreInfo(s,dark) {
-  if (s>=5) return {label:"Strong",bg:dark?"#052e16":"#dcfce7",text:dark?"#4ade80":"#166534",dot:"#22c55e"};
-  if (s>=3) return {label:"Good",  bg:dark?"#1c1400":"#fef9c3",text:dark?"#fbbf24":"#854d0e",dot:"#f59e0b"};
-  return          {label:"Weak",  bg:dark?"#1a1a2e":"#f3f4f6", text:dark?"#6b7280":"#6b7280",dot:"#9ca3af"};
+function scoreInfo(s,dark){
+  if(s>=5) return {label:"Strong",bg:dark?"#052e16":"#dcfce7",text:dark?"#4ade80":"#166534",dot:"#22c55e"};
+  if(s>=3) return {label:"Good",  bg:dark?"#1c1400":"#fef9c3",text:dark?"#fbbf24":"#854d0e",dot:"#f59e0b"};
+  return         {label:"Weak",  bg:dark?"#1a1a2e":"#f3f4f6", text:dark?"#6b7280":"#6b7280",dot:"#9ca3af"};
 }
-function catInfo(id) { return CG_CATS.find(c=>c.id===id)||{label:id,color:"#6366f1"}; }
-
-function projectURL(coin) {
-  if (coin.source === "CMC") {
-    return `https://coinmarketcap.com/currencies/${coin.name.toLowerCase().replace(/\s+/g,"-")}/`;
-  }
+function catInfo(id){ return CG_CATS.find(c=>c.id===id)||{label:id,color:"#6366f1"}; }
+function projectURL(coin){
+  if(coin.source==="CMC") return `https://coinmarketcap.com/currencies/${coin.name.toLowerCase().replace(/\s+/g,"-")}/`;
   return `https://www.coingecko.com/en/coins/${coin.rawId}`;
 }
 
-// ── API ────────────────────────────────────────────────────────────
+// ── API — calls our own /api routes (proxy locally, serverless on Vercel) ──
 async function fetchCG(cat) {
-  const res = await fetch(
-    `/cg-api/api/v3/coins/markets` +
-    `?vs_currency=usd&category=${cat.cgId}` +
-    `&order=market_cap_asc&per_page=250&page=1` +
-    `&sparkline=false&price_change_percentage=24h`,
-    { headers: { "x-cg-demo-api-key": CONFIG.COINGECKO_KEY, Accept: "application/json" } }
-  );
-  if (!res.ok) throw new Error(res.status===429?"Rate limited (wait 60s)":`CG ${res.status}`);
+  const qs = new URLSearchParams({
+    vs_currency:"usd", category:cat.cgId,
+    order:"market_cap_asc", per_page:"250", page:"1",
+    sparkline:"false", price_change_percentage:"24h",
+  }).toString();
+  const res = await fetch(`/api/coingecko?${qs}`);
+  if(!res.ok) throw new Error(res.status===429?"Rate limited (wait 60s)":`CG ${res.status}`);
   const data = await res.json();
   return data
     .filter(c=>c.market_cap>=MIN_MC&&c.market_cap<=MAX_MC&&(c.total_volume||0)>=MIN_VOL)
@@ -111,12 +96,11 @@ async function fetchCG(cat) {
 }
 
 async function fetchCMC() {
-  const res = await fetch(
-    `/cmc-api/v1/cryptocurrency/listings/latest` +
-    `?limit=500&convert=USD&sort=date_added&sort_dir=desc`,
-    { headers: { "X-CMC_PRO_API_KEY": CONFIG.CMC_KEY, Accept: "application/json" } }
-  );
-  if (!res.ok) {
+  const qs = new URLSearchParams({
+    limit:"500", convert:"USD", sort:"date_added", sort_dir:"desc",
+  }).toString();
+  const res = await fetch(`/api/cmc?${qs}`);
+  if(!res.ok){
     const e=await res.json().catch(()=>({}));
     throw new Error(e?.status?.error_message||`CMC ${res.status}`);
   }
@@ -137,74 +121,45 @@ async function fetchCMC() {
         mc:q.market_cap||0, price:q.price||0, vol:q.volume_24h||0,
         change24h:q.percent_change_24h||0,
         cat:guessCat(c.tags||[]), source:"CMC",
-        isNew:ageDays<=30, dateAdded:c.date_added,
+        isNew:ageDays<=30,
       };
     });
 }
 
-function guessCat(tags) {
+function guessCat(tags){
   const t=tags.map(x=>x.toLowerCase()).join(" ");
-  if (t.includes("defi")||t.includes("dex")||t.includes("lending")) return "defi";
-  if (t.includes("ai")||t.includes("artificial"))                    return "ai";
-  if (t.includes("meme")||t.includes("dog")||t.includes("cat"))     return "meme";
-  if (t.includes("layer")||t.includes("infra")||t.includes("oracle"))return "infra";
+  if(t.includes("defi")||t.includes("dex")||t.includes("lending")) return "defi";
+  if(t.includes("ai")||t.includes("artificial"))                    return "ai";
+  if(t.includes("meme")||t.includes("dog")||t.includes("cat"))     return "meme";
+  if(t.includes("layer")||t.includes("infra")||t.includes("oracle"))return "infra";
   return "other";
 }
 
-function exportCSV(coins) {
+function exportCSV(coins){
   const h=["Name","Symbol","Category","Source","Market Cap","Price","24h %","Volume","OTC Score","New?"];
   const r=coins.map(c=>[`"${c.name}"`,c.symbol,catInfo(c.cat).label,c.source,c.mc.toFixed(0),c.price,(c.change24h||0).toFixed(2),c.vol.toFixed(0),otcScore(c.mc,c.vol),c.isNew?"YES":""].join(","));
   const blob=new Blob([[h.join(","),...r].join("\n")],{type:"text/csv"});
   Object.assign(document.createElement("a"),{href:URL.createObjectURL(blob),download:"otc-scan.csv"}).click();
 }
 
-function Spinner() {
+function Spinner(){
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{animation:"spin 0.8s linear infinite",flexShrink:0}}><circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#fff" strokeWidth="3" strokeLinecap="round"/></svg>;
 }
 
-// ── Project Modal ──────────────────────────────────────────────────
-function ProjectModal({ coin, dark, onClose, onToggleWatch, isWatched }) {
-  const theme = T(dark);
-  const sc  = otcScore(coin.mc, coin.vol);
-  const si  = scoreInfo(sc, dark);
-  const cat = catInfo(coin.cat);
-  const chg = coin.change24h || 0;
-  const vr  = coin.mc > 0 ? ((coin.vol / coin.mc) * 100).toFixed(1) : "—";
-  const url = projectURL(coin);
-  const isCMC = coin.source === "CMC";
-
-  return (
-    <div
-      onClick={onClose}
-      style={{position:"fixed",inset:0,background:theme.overlay,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
-    >
-      <div
-        onClick={e=>e.stopPropagation()}
-        style={{
-          background:theme.modalBg,
-          border:`1px solid ${theme.border}`,
-          borderRadius:16,
-          width:"100%",
-          maxWidth:420,
-          boxShadow:"0 25px 60px rgba(0,0,0,0.3)",
-          animation:"modalIn 0.2s cubic-bezier(0.34,1.56,0.64,1)",
-          overflow:"hidden",
-        }}
-      >
-        {/* Modal header */}
-        <div style={{
-          background: `linear-gradient(135deg, ${cat.color}22, ${cat.color}08)`,
-          borderBottom:`1px solid ${theme.border}`,
-          padding:"20px 20px 16px",
-          display:"flex",alignItems:"flex-start",justifyContent:"space-between",
-        }}>
+// ── Modal ──────────────────────────────────────────────────────────
+function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
+  const theme=Th(dark);
+  const sc=otcScore(coin.mc,coin.vol), si=scoreInfo(sc,dark);
+  const cat=catInfo(coin.cat), chg=coin.change24h||0;
+  const vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
+  const url=projectURL(coin), isCMC=coin.source==="CMC";
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:theme.overlay,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:theme.modalBg,border:`1px solid ${theme.border}`,borderRadius:16,width:"100%",maxWidth:420,boxShadow:"0 25px 60px rgba(0,0,0,0.3)",animation:"modalIn 0.2s cubic-bezier(0.34,1.56,0.64,1)",overflow:"hidden"}}>
+        {/* Header */}
+        <div style={{background:`linear-gradient(135deg,${cat.color}22,${cat.color}08)`,borderBottom:`1px solid ${theme.border}`,padding:"20px 20px 16px",display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <img
-              src={coin.image} alt={coin.name}
-              width={52} height={52}
-              style={{borderRadius:"50%",border:`2px solid ${cat.color}40`,flexShrink:0}}
-              onError={e=>{e.target.style.display="none";}}
-            />
+            <img src={coin.image} alt={coin.name} width={52} height={52} style={{borderRadius:"50%",border:`2px solid ${cat.color}40`,flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
             <div>
               <div style={{fontSize:18,fontWeight:700,color:theme.text,display:"flex",alignItems:"center",gap:7}}>
                 {coin.name}
@@ -214,40 +169,36 @@ function ProjectModal({ coin, dark, onClose, onToggleWatch, isWatched }) {
                 <span>{coin.symbol}</span>
                 <span style={{width:3,height:3,borderRadius:"50%",background:theme.textDim}}/>
                 <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:isCMC?(dark?"#1a0a30":"#f5f3ff"):(dark?"#0a1a2e":"#eff6ff"),color:isCMC?"#8b5cf6":"#3b82f6",border:`1px solid ${isCMC?"#8b5cf630":"#3b82f630"}`}}>
-                  {isCMC?"CMC":"CoinGecko"}
+                  {isCMC?"CoinMarketCap":"CoinGecko"}
                 </span>
               </div>
             </div>
           </div>
-          <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:theme.textDim,padding:4,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:theme.textDim,padding:4,borderRadius:6}}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
           </button>
         </div>
-
-        {/* OTC Score bar */}
+        {/* OTC score bar */}
         <div style={{padding:"14px 20px",borderBottom:`1px solid ${theme.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{fontSize:11,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em"}}>OTC Score</div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{display:"flex",gap:4}}>
-              {[1,2,3,4,5,6].map(i=>(
-                <div key={i} style={{width:22,height:6,borderRadius:3,background:i<=sc?si.dot:theme.border,transition:"background 0.2s"}}/>
-              ))}
+              {[1,2,3,4,5,6].map(i=><div key={i} style={{width:22,height:6,borderRadius:3,background:i<=sc?si.dot:theme.border}}/>)}
             </div>
             <span style={{display:"inline-flex",alignItems:"center",gap:5,background:si.bg,color:si.text,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
               <span style={{width:6,height:6,borderRadius:"50%",background:si.dot}}/>{si.label} {sc}/6
             </span>
           </div>
         </div>
-
-        {/* Stats grid */}
+        {/* Stats */}
         <div style={{padding:"16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {label:"Market Cap",     value:fmtUSD(coin.mc),                                           },
-            {label:"Price",          value:fmtPrice(coin.price),                                      },
-            {label:"24h Change",     value:(chg>=0?"+":"")+chg.toFixed(2)+"%", color:chg>=0?"#22c55e":"#ef4444"},
-            {label:"Volume (24h)",   value:fmtUSD(coin.vol),                                          },
-            {label:"Vol / MC Ratio", value:vr!=="—"?vr+"%":"—",                                       },
-            {label:"Category",       value:cat.label,                           color:cat.color        },
+            {label:"Market Cap",    value:fmtUSD(coin.mc)},
+            {label:"Price",         value:fmtPrice(coin.price)},
+            {label:"24h Change",    value:(chg>=0?"+":"")+chg.toFixed(2)+"%", color:chg>=0?"#22c55e":"#ef4444"},
+            {label:"Volume (24h)",  value:fmtUSD(coin.vol)},
+            {label:"Vol / MC",      value:vr!=="—"?vr+"%":"—"},
+            {label:"Category",      value:cat.label, color:cat.color},
           ].map(row=>(
             <div key={row.label} style={{background:theme.statBg,borderRadius:9,padding:"12px 14px",border:`1px solid ${theme.border}`}}>
               <div style={{fontSize:10,color:theme.textDim,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:5}}>{row.label}</div>
@@ -255,44 +206,17 @@ function ProjectModal({ coin, dark, onClose, onToggleWatch, isWatched }) {
             </div>
           ))}
         </div>
-
         {/* Actions */}
         <div style={{padding:"0 20px 20px",display:"flex",gap:8,flexDirection:"column"}}>
-          {/* View on source button */}
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display:"flex",alignItems:"center",justifyContent:"center",gap:8,
-              padding:"11px 16px",borderRadius:9,
-              background:isCMC?"linear-gradient(135deg,#3b48ff,#6366f1)":"linear-gradient(135deg,#2ec97b,#10b981)",
-              color:"#fff",fontSize:13,fontWeight:700,
-              textDecoration:"none",transition:"opacity 0.15s",
-            }}
+          <a href={url} target="_blank" rel="noopener noreferrer"
+            style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"11px 16px",borderRadius:9,background:isCMC?"linear-gradient(135deg,#3b48ff,#6366f1)":"linear-gradient(135deg,#2ec97b,#10b981)",color:"#fff",fontSize:13,fontWeight:700,textDecoration:"none"}}
             onMouseEnter={e=>e.currentTarget.style.opacity="0.88"}
-            onMouseLeave={e=>e.currentTarget.style.opacity="1"}
-          >
-            {isCMC
-              ? <><CmcIcon/>View on CoinMarketCap</>
-              : <><CgIcon/>View on CoinGecko</>
-            }
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{marginLeft:2}}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
+            {isCMC?"View on CoinMarketCap":"View on CoinGecko"}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </a>
-
-          {/* Save to watchlist */}
-          <button
-            onClick={()=>onToggleWatch(coin.id)}
-            style={{
-              display:"flex",alignItems:"center",justifyContent:"center",gap:7,
-              padding:"10px 16px",borderRadius:9,
-              border:`1px solid ${isWatched?theme.accent+"60":theme.border}`,
-              background:isWatched?theme.accentBg:"transparent",
-              color:isWatched?theme.accentTxt:theme.textMid,
-              fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
-              transition:"all 0.15s",
-            }}
-          >
+          <button onClick={()=>onToggleWatch(coin.id)}
+            style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7,padding:"10px 16px",borderRadius:9,border:`1px solid ${isWatched?theme.accent+"60":theme.border}`,background:isWatched?theme.accentBg:"transparent",color:isWatched?theme.accentTxt:theme.textMid,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
             {isWatched?"✓ Saved to Watchlist":"Save to Watchlist"}
           </button>
         </div>
@@ -301,64 +225,47 @@ function ProjectModal({ coin, dark, onClose, onToggleWatch, isWatched }) {
   );
 }
 
-function CmcIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>;
-}
-function CgIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm-1-5h2V7h-2v8zm0 4h2v-2h-2v2z"/></svg>;
-}
+// ── main ───────────────────────────────────────────────────────────
+export default function App(){
+  const [dark,      setDark]      = useState(false);
+  const [sideOpen,  setSideOpen]  = useState(false);
+  const [allCoins,  setAllCoins]  = useState([]);
+  const [page,      setPage]      = useState(0);
+  const [watchlist, setWatchlist] = useState(new Set());
+  const [activeTab, setActiveTab] = useState("all");
+  const [sortBy,    setSortBy]    = useState("otc");
+  const [scanning,  setScanning]  = useState(false);
+  const [progress,  setProgress]  = useState("");
+  const [errors,    setErrors]    = useState([]);
+  const [lastScan,  setLastScan]  = useState(null);
+  const [newAlerts, setNewAlerts] = useState([]);
+  const [modalCoin, setModalCoin] = useState(null);
+  const theme=Th(dark);
 
-// ── main app ───────────────────────────────────────────────────────
-export default function App() {
-  const [dark,       setDark]       = useState(false);
-  const [sideOpen,   setSideOpen]   = useState(false);
-  const [allCoins,   setAllCoins]   = useState([]);
-  const [page,       setPage]       = useState(0);
-  const [watchlist,  setWatchlist]  = useState(new Set());
-  const [activeTab,  setActiveTab]  = useState("all");
-  const [sortBy,     setSortBy]     = useState("otc");
-  const [scanning,   setScanning]   = useState(false);
-  const [progress,   setProgress]   = useState("");
-  const [errors,     setErrors]     = useState([]);
-  const [lastScan,   setLastScan]   = useState(null);
-  const [newAlerts,  setNewAlerts]  = useState([]);
-  const [modalCoin,  setModalCoin]  = useState(null);
-  const theme = T(dark);
-
-  const keysSet =
-    CONFIG.COINGECKO_KEY !== "YOUR_COINGECKO_KEY_HERE" &&
-    CONFIG.CMC_KEY       !== "YOUR_CMC_KEY_HERE";
-
-  const scan = useCallback(async () => {
-    if (scanning) return;
+  const scan=useCallback(async()=>{
+    if(scanning) return;
     setScanning(true); setErrors([]); setNewAlerts([]); setAllCoins([]);
-    const fetched=[], errs=[];
-
-    for (let i=0;i<CG_CATS.length;i++) {
+    const fetched=[],errs=[];
+    for(let i=0;i<CG_CATS.length;i++){
       const cat=CG_CATS[i];
       setProgress(`CoinGecko: ${cat.label} (${i+1}/${CG_CATS.length})`);
-      if (i>0) await new Promise(r=>setTimeout(r,1500));
+      if(i>0) await new Promise(r=>setTimeout(r,1500));
       try   { fetched.push(...await fetchCG(cat)); }
-      catch(e) { errs.push(`CG/${cat.label}: ${e.message}`); }
+      catch(e){ errs.push(`CG/${cat.label}: ${e.message}`); }
     }
-
     const cgSyms=new Set(fetched.map(c=>c.symbol.toUpperCase()));
-
-    if (CONFIG.CMC_KEY!=="YOUR_CMC_KEY_HERE") {
-      setProgress("CMC: fetching listings…");
-      await new Promise(r=>setTimeout(r,800));
-      try {
-        const cmcCoins=await fetchCMC();
-        const newOnes=[];
-        for (const c of cmcCoins) {
-          if (cgSyms.has(c.symbol.toUpperCase())) continue;
-          fetched.push(c);
-          if (c.isNew) newOnes.push(c);
-        }
-        if (newOnes.length) setNewAlerts(newOnes.slice(0,10));
-      } catch(e) { errs.push(`CMC: ${e.message}`); }
-    }
-
+    setProgress("CMC: fetching listings…");
+    await new Promise(r=>setTimeout(r,800));
+    try{
+      const cmcCoins=await fetchCMC();
+      const newOnes=[];
+      for(const c of cmcCoins){
+        if(cgSyms.has(c.symbol.toUpperCase())) continue;
+        fetched.push(c);
+        if(c.isNew) newOnes.push(c);
+      }
+      if(newOnes.length) setNewAlerts(newOnes.slice(0,10));
+    }catch(e){ errs.push(`CMC: ${e.message}`); }
     const seen=new Set();
     setAllCoins(fetched.filter(c=>{if(seen.has(c.rawId))return false;seen.add(c.rawId);return true;}));
     setPage(0); setErrors(errs); setLastScan(new Date());
@@ -375,7 +282,7 @@ export default function App() {
     {id:"watch", label:"Watchlist",      count:watchlist.size},
   ];
 
-  const filtered=(() => {
+  const filtered=(()=>{
     let list=activeTab==="watch"?allCoins.filter(c=>watchlist.has(c.id)):activeTab==="new"?allCoins.filter(c=>c.isNew):activeTab==="all"?allCoins:allCoins.filter(c=>c.cat===activeTab);
     return [...list].sort((a,b)=>{
       if(sortBy==="otc")     return otcScore(b.mc,b.vol)-otcScore(a.mc,a.vol);
@@ -431,7 +338,7 @@ export default function App() {
     </>
   );
 
-  return (
+  return(
     <div style={{minHeight:"100vh",background:theme.bg,color:theme.text,fontFamily:"'DM Sans',system-ui,sans-serif",display:"flex",transition:"background 0.2s,color 0.2s"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
@@ -448,32 +355,18 @@ export default function App() {
         .m-btn{display:none}
         .desk-tbl{display:block}
         .mob-cards{display:none}
-        .row-click{cursor:pointer}
-        .row-click:hover td{background:inherit}
         @media(max-width:768px){.d-side{display:none}.m-btn{display:flex!important}.m-side{display:flex}}
         @media(max-width:640px){.desk-tbl{display:none!important}.mob-cards{display:block!important}}
       `}</style>
 
-      {/* Modal */}
-      {modalCoin && (
-        <ProjectModal
-          coin={modalCoin}
-          dark={dark}
-          onClose={()=>setModalCoin(null)}
-          onToggleWatch={toggleWatch}
-          isWatched={watchlist.has(modalCoin.id)}
-        />
-      )}
+      {modalCoin&&<ProjectModal coin={modalCoin} dark={dark} onClose={()=>setModalCoin(null)} onToggleWatch={toggleWatch} isWatched={watchlist.has(modalCoin.id)}/>}
 
-      {/* Desktop sidebar */}
       <aside className="d-side" style={{width:220,background:theme.bgSide,borderRight:`1px solid ${theme.border}`,flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto",transition:"background 0.2s"}}>
         <SidebarInner/>
       </aside>
 
-      {/* Mobile overlay */}
       {sideOpen&&<div onClick={()=>setSideOpen(false)} style={{position:"fixed",inset:0,background:theme.overlay,zIndex:40}}/>}
 
-      {/* Mobile drawer */}
       <aside className="m-side" style={{background:theme.bgSide,borderRight:`1px solid ${theme.border}`,boxShadow:"2px 0 20px rgba(0,0,0,0.15)",transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)"}}>
         <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 12px 0"}}>
           <button onClick={()=>setSideOpen(false)} style={{background:"transparent",border:"none",cursor:"pointer",color:theme.textMid,padding:6}}>
@@ -483,7 +376,6 @@ export default function App() {
         <SidebarInner/>
       </aside>
 
-      {/* Main */}
       <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
         <header style={{background:theme.headerBg,borderBottom:`1px solid ${theme.border}`,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,position:"sticky",top:0,zIndex:20,flexWrap:"wrap",transition:"background 0.2s"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -515,18 +407,11 @@ export default function App() {
         </header>
 
         <div style={{padding:"20px",flex:1}}>
-          {!keysSet&&(
-            <div style={{background:dark?"#1c1400":"#fffbeb",border:"1px solid #f59e0b50",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:dark?"#fbbf24":"#92400e"}}>
-              <strong>⚠ API keys not set.</strong> Open <code style={{background:dark?"#0a0a14":"#fef3c7",padding:"1px 5px",borderRadius:4}}>src/App.jsx</code> and replace the placeholder text in the CONFIG block at the top with your actual keys.
-            </div>
-          )}
-
           {errors.length>0&&(
             <div style={{background:dark?"#1a0808":"#fef2f2",border:`1px solid ${dark?"#7f1d1d50":"#fecaca"}`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:dark?"#fca5a5":"#991b1b"}}>
               <strong>Notices:</strong> {errors.join(" · ")}
             </div>
           )}
-
           {newAlerts.length>0&&(
             <div style={{background:dark?"#1a0808":"#fff5f5",border:"1px solid #ef444430",borderRadius:10,padding:"14px 16px",marginBottom:16,animation:"fadeUp 0.3s ease"}}>
               <div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
@@ -534,22 +419,17 @@ export default function App() {
                 {newAlerts.length} NEW LISTING{newAlerts.length>1?"S":""} meet your OTC criteria (last 30 days)
               </div>
               <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                {newAlerts.map(c=>(
-                  <span key={c.id} onClick={()=>setModalCoin(c)} style={{background:dark?"#0a0a14":"#fff",border:"1px solid #ef444430",borderRadius:6,padding:"3px 10px",fontSize:12,color:dark?"#fca5a5":"#dc2626",fontWeight:600,cursor:"pointer"}}>
-                    {c.name} <span style={{opacity:.7,fontSize:10}}>{c.symbol}</span>
-                  </span>
-                ))}
+                {newAlerts.map(c=><span key={c.id} onClick={()=>setModalCoin(c)} style={{background:dark?"#0a0a14":"#fff",border:"1px solid #ef444430",borderRadius:6,padding:"3px 10px",fontSize:12,color:dark?"#fca5a5":"#dc2626",fontWeight:600,cursor:"pointer"}}>{c.name} <span style={{opacity:.7,fontSize:10}}>{c.symbol}</span></span>)}
               </div>
             </div>
           )}
-
           {allCoins.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:20,animation:"fadeUp 0.3s ease"}}>
               {[
-                {label:"Total found",  value:allCoins.length,                                        sub:"after all filters", accent:"#6366f1"},
-                {label:"Strong OTC",   value:allCoins.filter(c=>otcScore(c.mc,c.vol)>=5).length,     sub:"score 5–6 / 6",    accent:"#22c55e"},
-                {label:"New listings", value:allCoins.filter(c=>c.isNew).length,                     sub:"last 30 days",     accent:"#ef4444"},
-                {label:"Watchlist",    value:watchlist.size,                                          sub:"saved projects",   accent:"#f59e0b"},
+                {label:"Total found",  value:allCoins.length,                                       sub:"after all filters", accent:"#6366f1"},
+                {label:"Strong OTC",   value:allCoins.filter(c=>otcScore(c.mc,c.vol)>=5).length,    sub:"score 5–6 / 6",    accent:"#22c55e"},
+                {label:"New listings", value:allCoins.filter(c=>c.isNew).length,                    sub:"last 30 days",     accent:"#ef4444"},
+                {label:"Watchlist",    value:watchlist.size,                                         sub:"saved projects",   accent:"#f59e0b"},
               ].map(s=>(
                 <div key={s.label} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:"14px 16px",borderTop:`3px solid ${s.accent}`,transition:"background 0.2s"}}>
                   <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>{s.label}</div>
@@ -559,7 +439,6 @@ export default function App() {
               ))}
             </div>
           )}
-
           {filtered.length>0&&(
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,flexWrap:"wrap"}}>
               <span style={{fontSize:12,color:theme.textDim}}>Sort by</span>
@@ -571,7 +450,6 @@ export default function App() {
               <button onClick={()=>{setAllCoins([]);setPage(0);setErrors([]);setNewAlerts([]);setLastScan(null);}} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textMid,fontSize:12,cursor:"pointer",fontWeight:600}}>Clear all</button>
             </div>
           )}
-
           {!scanning&&allCoins.length===0&&(
             <div style={{textAlign:"center",padding:"80px 20px",animation:"fadeUp 0.3s ease"}}>
               <div style={{width:56,height:56,borderRadius:14,background:theme.accentBg,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>
@@ -579,11 +457,10 @@ export default function App() {
               </div>
               <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>Ready to scan</div>
               <div style={{fontSize:13,color:theme.textDim,maxWidth:300,margin:"0 auto",lineHeight:1.7}}>
-                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects from CoinGecko + CMC. Results show 10 at a time.
+                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects. Results show 10 at a time.
               </div>
             </div>
           )}
-
           {activeTab==="watch"&&watchlist.size===0&&allCoins.length>0&&(
             <div style={{textAlign:"center",padding:"60px 0",color:theme.textDim,fontSize:13}}>No saved projects — click any row then Save to Watchlist.</div>
           )}
@@ -602,18 +479,13 @@ export default function App() {
                   </thead>
                   <tbody>
                     {visible.map((coin,i)=>{
-                      const chg=coin.change24h||0, vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
-                      const sc=otcScore(coin.mc,coin.vol), si=scoreInfo(sc,dark);
-                      const cat=catInfo(coin.cat), isW=watchlist.has(coin.id);
+                      const chg=coin.change24h||0,vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
+                      const sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark);
+                      const cat=catInfo(coin.cat),isW=watchlist.has(coin.id);
                       return(
-                        <tr
-                          key={coin.id}
-                          className="row-click"
-                          onClick={()=>setModalCoin(coin)}
-                          style={{borderBottom:i<visible.length-1?`1px solid ${theme.border}`:"none",transition:"background 0.1s"}}
+                        <tr key={coin.id} onClick={()=>setModalCoin(coin)} style={{borderBottom:i<visible.length-1?`1px solid ${theme.border}`:"none",cursor:"pointer",transition:"background 0.1s"}}
                           onMouseEnter={e=>e.currentTarget.style.background=theme.bgHov}
-                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}
-                        >
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                           <td style={{padding:"11px 12px"}}>
                             <div style={{display:"flex",alignItems:"center",gap:9}}>
                               <img src={coin.image} alt="" width={26} height={26} style={{borderRadius:"50%",flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
@@ -671,7 +543,7 @@ export default function App() {
           {visible.length>0&&(
             <div className="mob-cards">
               {visible.map(coin=>{
-                const chg=coin.change24h||0, sc=otcScore(coin.mc,coin.vol), si=scoreInfo(sc,dark), cat=catInfo(coin.cat), isW=watchlist.has(coin.id);
+                const chg=coin.change24h||0,sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark),cat=catInfo(coin.cat),isW=watchlist.has(coin.id);
                 return(
                   <div key={coin.id} onClick={()=>setModalCoin(coin)} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:14,marginBottom:10,cursor:"pointer",transition:"border-color 0.15s"}}
                     onMouseEnter={e=>e.currentTarget.style.borderColor=theme.accent+"60"}
@@ -700,7 +572,7 @@ export default function App() {
                       <span style={{display:"inline-flex",alignItems:"center",gap:5,background:cat.color+"18",color:cat.color,border:`1px solid ${cat.color}30`,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700}}>
                         <span style={{width:5,height:5,borderRadius:"50%",background:cat.color}}/>{cat.label}
                       </span>
-                      <span style={{fontSize:11,color:theme.textDim}}>Tap to view details →</span>
+                      <span style={{fontSize:11,color:theme.textDim}}>Tap for details →</span>
                     </div>
                   </div>
                 );
