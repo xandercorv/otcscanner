@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 const MIN_MC    = 1_000_000;
 const MAX_MC    = 10_000_000;
 const MIN_VOL   = 400_000;
-const PER_CAT   = 10; // exactly 10 per category
+const PER_CAT   = 10;
 
 const CG_CATS = [
   { id:"defi",  label:"DeFi",           cgId:"decentralized-finance-defi", color:"#6366f1" },
@@ -20,153 +20,166 @@ const SORT_OPTIONS = [
   { value:"change",  label:"24h Change"   },
 ];
 
-// ── localStorage ───────────────────────────────────────────────────
-function lsGet(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-  catch { return fallback; }
-}
-function lsSet(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {} 
-}
+// ── localStorage ──────────────────────────────────────────────────
+function lsGet(key,fb){ try{ const v=localStorage.getItem(key); return v?JSON.parse(v):fb; }catch{ return fb; } }
+function lsSet(key,val){ try{ localStorage.setItem(key,JSON.stringify(val)); }catch{} }
 
-// ── pick N random items from array ────────────────────────────────
-function pickN(arr, n) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+// ── shuffle array ─────────────────────────────────────────────────
+function shuffle(arr){
+  const a=[...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
   }
-  return a.slice(0, n);
+  return a;
 }
 
 // ── theme ──────────────────────────────────────────────────────────
-function Th(dark) {
-  return dark ? {
-    bg:"#0f0f1a", bgSide:"#0a0a14", bgCard:"#13131f", bgHov:"#1a1a2e",
-    border:"#1e1e35", borderMid:"#2a2a45",
-    text:"#e8e8ff", textMid:"#9090c0", textDim:"#4a4a6a",
-    accent:"#6366f1", accentBg:"#6366f115", accentTxt:"#a5b4fc",
-    navAct:"#6366f118", navActTxt:"#a5b4fc",
-    statBg:"#0d0d1a", headerBg:"#0a0a14",
-    shadow:"0 1px 3px rgba(0,0,0,0.5)", overlay:"rgba(0,0,0,0.75)", modalBg:"#13131f",
-  } : {
-    bg:"#f5f5f8", bgSide:"#ffffff", bgCard:"#ffffff", bgHov:"#f9f9fc",
-    border:"#e8e8f0", borderMid:"#d0d0e0",
-    text:"#111827", textMid:"#6b7280", textDim:"#9ca3af",
-    accent:"#6366f1", accentBg:"#6366f110", accentTxt:"#6366f1",
-    navAct:"#6366f110", navActTxt:"#6366f1",
-    statBg:"#f9f9fc", headerBg:"#ffffff",
-    shadow:"0 1px 3px rgba(0,0,0,0.07)", overlay:"rgba(0,0,0,0.5)", modalBg:"#ffffff",
+function Th(dark){
+  return dark?{
+    bg:"#0f0f1a",bgSide:"#0a0a14",bgCard:"#13131f",bgHov:"#1a1a2e",
+    border:"#1e1e35",borderMid:"#2a2a45",
+    text:"#e8e8ff",textMid:"#9090c0",textDim:"#4a4a6a",
+    accent:"#6366f1",accentBg:"#6366f115",accentTxt:"#a5b4fc",
+    navAct:"#6366f118",navActTxt:"#a5b4fc",
+    statBg:"#0d0d1a",headerBg:"#0a0a14",
+    shadow:"0 1px 3px rgba(0,0,0,0.5)",overlay:"rgba(0,0,0,0.75)",modalBg:"#13131f",
+  }:{
+    bg:"#f5f5f8",bgSide:"#ffffff",bgCard:"#ffffff",bgHov:"#f9f9fc",
+    border:"#e8e8f0",borderMid:"#d0d0e0",
+    text:"#111827",textMid:"#6b7280",textDim:"#9ca3af",
+    accent:"#6366f1",accentBg:"#6366f110",accentTxt:"#6366f1",
+    navAct:"#6366f110",navActTxt:"#6366f1",
+    statBg:"#f9f9fc",headerBg:"#ffffff",
+    shadow:"0 1px 3px rgba(0,0,0,0.07)",overlay:"rgba(0,0,0,0.5)",modalBg:"#ffffff",
   };
 }
 
 // ── helpers ────────────────────────────────────────────────────────
-const fmtUSD = n => {
-  if (!n&&n!==0) return "—";
-  if (n>=1e9) return "$"+(n/1e9).toFixed(2)+"B";
-  if (n>=1e6) return "$"+(n/1e6).toFixed(2)+"M";
-  if (n>=1e3) return "$"+(n/1e3).toFixed(1)+"K";
-  return "$"+n.toFixed(4);
+const fmtUSD=n=>{
+  if(!n&&n!==0)return"—";
+  if(n>=1e9)return"$"+(n/1e9).toFixed(2)+"B";
+  if(n>=1e6)return"$"+(n/1e6).toFixed(2)+"M";
+  if(n>=1e3)return"$"+(n/1e3).toFixed(1)+"K";
+  return"$"+n.toFixed(4);
 };
-const fmtPrice = n => {
-  if (!n&&n!==0) return "—";
-  if (n>=1)    return "$"+n.toFixed(3);
-  if (n>=0.01) return "$"+n.toFixed(4);
-  return "$"+n.toExponential(2);
+const fmtPrice=n=>{
+  if(!n&&n!==0)return"—";
+  if(n>=1)return"$"+n.toFixed(3);
+  if(n>=0.01)return"$"+n.toFixed(4);
+  return"$"+n.toExponential(2);
 };
 function otcScore(mc,vol){
   let s=0;
-  if(mc>=MIN_MC&&mc<=MAX_MC)   s+=3;
-  if(vol>=MIN_VOL)             s+=1;
+  if(mc>=MIN_MC&&mc<=MAX_MC) s+=3;
+  if(vol>=MIN_VOL)           s+=1;
   if(vol>0&&mc>0&&vol/mc<0.1) s+=1;
-  if(mc<5_000_000)            s+=1;
+  if(mc<5_000_000)           s+=1;
   return Math.min(s,6);
 }
 function scoreInfo(s,dark){
-  if(s>=5) return {label:"Strong",bg:dark?"#052e16":"#dcfce7",text:dark?"#4ade80":"#166534",dot:"#22c55e"};
-  if(s>=3) return {label:"Good",  bg:dark?"#1c1400":"#fef9c3",text:dark?"#fbbf24":"#854d0e",dot:"#f59e0b"};
-  return         {label:"Weak",  bg:dark?"#1a1a2e":"#f3f4f6", text:dark?"#6b7280":"#6b7280",dot:"#9ca3af"};
+  if(s>=5)return{label:"Strong",bg:dark?"#052e16":"#dcfce7",text:dark?"#4ade80":"#166534",dot:"#22c55e"};
+  if(s>=3)return{label:"Good",bg:dark?"#1c1400":"#fef9c3",text:dark?"#fbbf24":"#854d0e",dot:"#f59e0b"};
+  return{label:"Weak",bg:dark?"#1a1a2e":"#f3f4f6",text:dark?"#6b7280":"#6b7280",dot:"#9ca3af"};
 }
 function catInfo(id){ return CG_CATS.find(c=>c.id===id)||{label:id,color:"#6366f1"}; }
 function projectURL(coin){
-  if(coin.source==="CMC") return `https://coinmarketcap.com/currencies/${coin.name.toLowerCase().replace(/\s+/g,"-")}/`;
-  return `https://www.coingecko.com/en/coins/${coin.rawId}`;
+  if(coin.source==="CMC")return`https://coinmarketcap.com/currencies/${coin.name.toLowerCase().replace(/\s+/g,"-")}/`;
+  return`https://www.coingecko.com/en/coins/${coin.rawId}`;
 }
 
-// ── fetch ALL qualifying coins for a CG category (pages 1+2) ──────
-async function fetchCGAll(cat) {
-  const results = [];
-  for (const page of [1, 2]) {
-    try {
-      const qs = new URLSearchParams({
-        vs_currency:"usd", category:cat.cgId,
-        order:"market_cap_asc", per_page:"250", page:String(page),
-        sparkline:"false", price_change_percentage:"24h",
+// ── API ────────────────────────────────────────────────────────────
+// Fetch ONE category from CG across multiple pages to build a large pool
+async function fetchCGPool(cat){
+  const pool=[];
+  // Try pages 1 through 4 to get a big enough pool
+  for(const page of[1,2,3,4]){
+    try{
+      const qs=new URLSearchParams({
+        vs_currency:"usd",category:cat.cgId,
+        order:"market_cap_asc",per_page:"250",page:String(page),
+        sparkline:"false",price_change_percentage:"24h",
       }).toString();
-      const res = await fetch(`/api/coingecko?${qs}`);
-      if (!res.ok) break;
-      const data = await res.json();
-      const filtered = data.filter(c =>
-        c.market_cap >= MIN_MC && c.market_cap <= MAX_MC &&
-        (c.total_volume||0) >= MIN_VOL
-      ).map(c => ({
-        id:"cg_"+c.id, rawId:c.id,
-        name:c.name, symbol:(c.symbol||"").toUpperCase(),
-        image:c.image, mc:c.market_cap, price:c.current_price,
-        vol:c.total_volume, change24h:c.price_change_percentage_24h,
-        cat:cat.id, source:"CoinGecko", isNew:false,
-      }));
-      results.push(...filtered);
-      await new Promise(r => setTimeout(r, 1000));
-    } catch(e) { break; }
+      const res=await fetch(`/api/coingecko?${qs}`);
+      if(!res.ok) break;
+      const data=await res.json();
+      if(!Array.isArray(data)||data.length===0) break;
+      const batch=data
+        .filter(c=>c.market_cap>=MIN_MC&&c.market_cap<=MAX_MC&&(c.total_volume||0)>=MIN_VOL)
+        .map(c=>({
+          id:"cg_"+c.id,rawId:c.id,
+          name:c.name,symbol:(c.symbol||"").toUpperCase(),
+          image:c.image,mc:c.market_cap,price:c.current_price,
+          vol:c.total_volume,change24h:c.price_change_percentage_24h,
+          cat:cat.id,source:"CoinGecko",isNew:false,
+        }));
+      pool.push(...batch);
+      // If we already have enough candidates stop early
+      if(pool.length>=40) break;
+      await new Promise(r=>setTimeout(r,800));
+    }catch(e){ break; }
   }
-  return results;
+  return pool;
 }
 
-// ── fetch ALL qualifying CMC coins (multiple pages) ───────────────
-async function fetchCMCAll() {
-  const results = [];
-  const now = Date.now();
-  for (const start of [1, 201, 401]) {
-    try {
-      const qs = new URLSearchParams({
-        limit:"200", start:String(start), convert:"USD",
-        sort:"market_cap", sort_dir:"asc",
+async function fetchCMCPool(){
+  const pool=[];
+  const now=Date.now();
+  for(const start of[1,201,401]){
+    try{
+      const qs=new URLSearchParams({
+        limit:"200",start:String(start),convert:"USD",
+        sort:"market_cap",sort_dir:"asc",
       }).toString();
-      const res = await fetch(`/api/cmc?${qs}`);
-      if (!res.ok) break;
-      const data = await res.json();
-      const filtered = (data.data||[])
-        .filter(c => {
-          const mc=c.quote?.USD?.market_cap||0, vol=c.quote?.USD?.volume_24h||0;
-          return mc>=MIN_MC && mc<=MAX_MC && vol>=MIN_VOL;
+      const res=await fetch(`/api/cmc?${qs}`);
+      if(!res.ok) break;
+      const data=await res.json();
+      const batch=(data.data||[])
+        .filter(c=>{
+          const mc=c.quote?.USD?.market_cap||0,vol=c.quote?.USD?.volume_24h||0;
+          return mc>=MIN_MC&&mc<=MAX_MC&&vol>=MIN_VOL;
         })
-        .map(c => {
+        .map(c=>{
           const q=c.quote?.USD||{};
           const ageDays=(now-new Date(c.date_added).getTime())/86400000;
-          return {
-            id:"cmc_"+c.id, rawId:String(c.id),
-            name:c.name, symbol:c.symbol,
+          return{
+            id:"cmc_"+c.id,rawId:String(c.id),
+            name:c.name,symbol:c.symbol,
             image:`https://s2.coinmarketcap.com/static/img/coins/64x64/${c.id}.png`,
-            mc:q.market_cap||0, price:q.price||0, vol:q.volume_24h||0,
+            mc:q.market_cap||0,price:q.price||0,vol:q.volume_24h||0,
             change24h:q.percent_change_24h||0,
-            cat:guessCat(c.tags||[]), source:"CMC", isNew:ageDays<=30,
+            cat:guessCat(c.tags||[]),source:"CMC",isNew:ageDays<=30,
           };
         });
-      results.push(...filtered);
-      await new Promise(r => setTimeout(r, 800));
-    } catch(e) { break; }
+      pool.push(...batch);
+      await new Promise(r=>setTimeout(r,600));
+    }catch(e){ break; }
   }
-  return results;
+  return pool;
 }
 
 function guessCat(tags){
   const t=tags.map(x=>x.toLowerCase()).join(" ");
-  if(t.includes("defi")||t.includes("dex")||t.includes("lending")) return "defi";
-  if(t.includes("ai")||t.includes("artificial"))                    return "ai";
-  if(t.includes("meme")||t.includes("dog")||t.includes("cat"))     return "meme";
-  if(t.includes("layer")||t.includes("infra")||t.includes("oracle"))return "infra";
-  return "other";
+  if(t.includes("defi")||t.includes("dex")||t.includes("lending"))return"defi";
+  if(t.includes("ai")||t.includes("artificial"))return"ai";
+  if(t.includes("meme")||t.includes("dog")||t.includes("cat"))return"meme";
+  if(t.includes("layer")||t.includes("infra")||t.includes("oracle"))return"infra";
+  return"other";
+}
+
+// Pick N unseen items from pool. If not enough unseen, reset seen and pick from all.
+function pickUnseen(pool,seenSet,n){
+  const unseen=pool.filter(c=>!seenSet.has(c.rawId));
+  if(unseen.length>=n){
+    const picked=shuffle(unseen).slice(0,n);
+    picked.forEach(c=>seenSet.add(c.rawId));
+    return picked;
+  }
+  // Not enough unseen — reset and pick from entire pool
+  seenSet.clear();
+  const picked=shuffle(pool).slice(0,n);
+  picked.forEach(c=>seenSet.add(c.rawId));
+  return picked;
 }
 
 function exportCSV(coins){
@@ -177,7 +190,7 @@ function exportCSV(coins){
 }
 
 function Spinner(){
-  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{animation:"spin 0.8s linear infinite",flexShrink:0}}><circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#fff" strokeWidth="3" strokeLinecap="round"/></svg>;
+  return<svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{animation:"spin 0.8s linear infinite",flexShrink:0}}><circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#fff" strokeWidth="3" strokeLinecap="round"/></svg>;
 }
 
 // ── Modal ──────────────────────────────────────────────────────────
@@ -224,12 +237,12 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
         </div>
         <div style={{padding:"16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {label:"Market Cap",  value:fmtUSD(coin.mc)},
-            {label:"Price",       value:fmtPrice(coin.price)},
-            {label:"24h Change",  value:(chg>=0?"+":"")+chg.toFixed(2)+"%", color:chg>=0?"#22c55e":"#ef4444"},
+            {label:"Market Cap",value:fmtUSD(coin.mc)},
+            {label:"Price",value:fmtPrice(coin.price)},
+            {label:"24h Change",value:(chg>=0?"+":"")+chg.toFixed(2)+"%",color:chg>=0?"#22c55e":"#ef4444"},
             {label:"Volume (24h)",value:fmtUSD(coin.vol)},
-            {label:"Vol / MC",    value:vr!=="—"?vr+"%":"—"},
-            {label:"Category",    value:cat.label, color:cat.color},
+            {label:"Vol / MC",value:vr!=="—"?vr+"%":"—"},
+            {label:"Category",value:cat.label,color:cat.color},
           ].map(row=>(
             <div key={row.label} style={{background:theme.statBg,borderRadius:9,padding:"12px 14px",border:`1px solid ${theme.border}`}}>
               <div style={{fontSize:10,color:theme.textDim,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:5}}>{row.label}</div>
@@ -257,22 +270,22 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
 
 // ── main ───────────────────────────────────────────────────────────
 export default function App(){
-  const [dark,       setDark]      = useState(()=>lsGet("otc_dark",false));
-  const [sideOpen,   setSideOpen]  = useState(false);
-  const [allCoins,   setAllCoins]  = useState(()=>lsGet("otc_coins",[]));
-  const [errors,     setErrors]    = useState(()=>lsGet("otc_errors",[]));
-  const [lastScan,   setLastScan]  = useState(()=>{ const v=lsGet("otc_lastscan",null); return v?new Date(v):null; });
-  const [newAlerts,  setNewAlerts] = useState(()=>lsGet("otc_alerts",[]));
-  const [scanning,   setScanning]  = useState(false);
-  const [progress,   setProgress]  = useState("");
-  const [activeTab,  setActiveTab] = useState("all");
-  const [sortBy,     setSortBy]    = useState("otc");
-  const [page,       setPage]      = useState(0);
-  const [modalCoin,  setModalCoin] = useState(null);
+  const [dark,      setDark]     =useState(()=>lsGet("otc_dark",false));
+  const [sideOpen,  setSideOpen] =useState(false);
+  const [allCoins,  setAllCoins] =useState(()=>lsGet("otc_coins",[]));
+  const [errors,    setErrors]   =useState(()=>lsGet("otc_errors",[]));
+  const [lastScan,  setLastScan] =useState(()=>{ const v=lsGet("otc_lastscan",null); return v?new Date(v):null; });
+  const [newAlerts, setNewAlerts]=useState(()=>lsGet("otc_alerts",[]));
+  const [scanning,  setScanning] =useState(false);
+  const [progress,  setProgress] =useState("");
+  const [activeTab, setActiveTab]=useState("all");
+  const [sortBy,    setSortBy]   =useState("otc");
+  const [page,      setPage]     =useState(0);
+  const [modalCoin, setModalCoin]=useState(null);
 
-  // watchMap: stores full coin objects, survives clear
-  const [watchMap, setWatchMapRaw] = useState(()=>new Map(lsGet("otc_watchmap",[])));
-  const setWatchMap = fn => {
+  // Watchmap stores full coin objects — survives clear scan
+  const [watchMap,setWatchMapRaw]=useState(()=>new Map(lsGet("otc_watchmap",[])));
+  const setWatchMap=fn=>{
     setWatchMapRaw(prev=>{
       const next=typeof fn==="function"?fn(prev):fn;
       lsSet("otc_watchmap",[...next.entries()]);
@@ -285,18 +298,17 @@ export default function App(){
     return next;
   });
 
-  // seenIds: tracks every rawId ever shown, so we never repeat
-  // stored per-category: { defi: Set, ai: Set, meme: Set, infra: Set }
+  // Seen IDs per category — persisted across sessions
   const loadSeen=()=>{
-    const saved=lsGet("otc_seen",{});
+    const raw=lsGet("otc_seen2",{});
     const out={};
-    for(const cat of CG_CATS) out[cat.id]=new Set(saved[cat.id]||[]);
+    for(const cat of CG_CATS) out[cat.id]=new Set(raw[cat.id]||[]);
     return out;
   };
-  const saveSeen=(seenByCat)=>{
+  const saveSeen=seenByCat=>{
     const out={};
     for(const cat of CG_CATS) out[cat.id]=[...seenByCat[cat.id]];
-    lsSet("otc_seen",out);
+    lsSet("otc_seen2",out);
   };
 
   const persist=(coins,errs,alerts,ts)=>{
@@ -310,67 +322,53 @@ export default function App(){
     if(scanning) return;
     setScanning(true);
     setAllCoins([]); lsSet("otc_coins",[]);
-    setErrors([]);   lsSet("otc_errors",[]);
-    setNewAlerts([]); lsSet("otc_alerts",[]);
+    setErrors([]);
+    setNewAlerts([]);
     setPage(0);
 
     const seenByCat=loadSeen();
     const errs=[];
-    const chosen=[];   // final 40 coins
+    const result=[];
     const newOnes=[];
 
-    // ── Step 1: fetch CMC pool once (shared across cats via guessCat)
+    // Fetch CMC pool once upfront
     setProgress("Fetching CMC pool…");
     let cmcPool=[];
-    try { cmcPool=await fetchCMCAll(); }
+    try{ cmcPool=await fetchCMCPool(); }
     catch(e){ errs.push(`CMC: ${e.message}`); }
 
-    const cmcSymbols=new Set(cmcPool.map(c=>c.symbol.toUpperCase()));
-
-    // ── Step 2: per category, fetch CG + merge CMC, pick 10 unseen ──
+    // Per category: build pool from CG + relevant CMC coins, pick 10 unseen
     for(let ci=0;ci<CG_CATS.length;ci++){
       const cat=CG_CATS[ci];
-      setProgress(`Fetching ${cat.label}… (${ci+1}/${CG_CATS.length})`);
+      setProgress(`Building ${cat.label} pool… (${ci+1}/${CG_CATS.length})`);
 
-      // fetch CG pool for this category
+      // Fetch CG pool for this category
       let cgPool=[];
-      try { cgPool=await fetchCGAll(cat); }
+      try{ cgPool=await fetchCGPool(cat); }
       catch(e){ errs.push(`CG/${cat.label}: ${e.message}`); }
 
-      // CMC coins that belong to this category (not already in CG)
-      const cmcForCat=cmcPool.filter(c=>
-        c.cat===cat.id &&
-        !cgPool.some(g=>g.symbol===c.symbol)
-      );
+      // Add CMC coins for this category (exclude symbols already in cgPool)
+      const cgSymbols=new Set(cgPool.map(c=>c.symbol));
+      const cmcForCat=cmcPool.filter(c=>c.cat===cat.id&&!cgSymbols.has(c.symbol));
 
-      // merge both sources
+      // Combined pool for this category
       const pool=[...cgPool,...cmcForCat];
 
-      // filter out already seen
-      let unseen=pool.filter(c=>!seenByCat[cat.id].has(c.rawId));
-
-      // if we've exhausted unseen, reset this category's history
-      if(unseen.length < PER_CAT){
-        seenByCat[cat.id]=new Set();
-        unseen=pool;
+      if(pool.length===0){
+        errs.push(`${cat.label}: No qualifying projects found`);
+        continue;
       }
 
-      // pick exactly PER_CAT randomly from unseen
-      const picked=pickN(unseen, PER_CAT);
-
-      // mark as seen
-      picked.forEach(c=>seenByCat[cat.id].add(c.rawId));
-
-      // collect new listings
+      // Pick PER_CAT unseen from pool (auto-resets if exhausted)
+      const picked=pickUnseen(pool,seenByCat[cat.id],PER_CAT);
       picked.forEach(c=>{ if(c.isNew) newOnes.push(c); });
-
-      chosen.push(...picked);
+      result.push(...picked);
     }
 
-    // save updated seen history
+    // Save updated seen history
     saveSeen(seenByCat);
 
-    persist(chosen, errs, newOnes.slice(0,10), new Date());
+    persist(result,errs,newOnes.slice(0,10),new Date());
     setScanning(false);
     setProgress("");
   },[scanning]);
@@ -382,37 +380,33 @@ export default function App(){
     setLastScan(null); lsSet("otc_lastscan",null);
     setPage(0);
   };
-
-  const resetSeen=()=>{
-    lsSet("otc_seen",{});
-  };
-
   const clearWatchlist=()=>setWatchMap(new Map());
+  const resetHistory=()=>{ lsSet("otc_seen2",{}); };
 
   const watchCoins=[...watchMap.values()];
 
   const tabs=[
-    {id:"all",   label:"All (40)",        count:allCoins.length},
-    {id:"defi",  label:"DeFi",            count:allCoins.filter(c=>c.cat==="defi").length,  color:"#6366f1"},
-    {id:"ai",    label:"AI + Crypto",     count:allCoins.filter(c=>c.cat==="ai").length,    color:"#10b981"},
-    {id:"meme",  label:"Memes",           count:allCoins.filter(c=>c.cat==="meme").length,  color:"#f59e0b"},
-    {id:"infra", label:"Infrastructure",  count:allCoins.filter(c=>c.cat==="infra").length, color:"#8b5cf6"},
-    {id:"new",   label:"New Listings",    count:allCoins.filter(c=>c.isNew).length,         color:"#ef4444"},
-    {id:"watch", label:"Watchlist",       count:watchCoins.length},
+    {id:"all",   label:"All projects",   count:allCoins.length},
+    {id:"defi",  label:"DeFi",           count:allCoins.filter(c=>c.cat==="defi").length,  color:"#6366f1"},
+    {id:"ai",    label:"AI + Crypto",    count:allCoins.filter(c=>c.cat==="ai").length,    color:"#10b981"},
+    {id:"meme",  label:"Memes",          count:allCoins.filter(c=>c.cat==="meme").length,  color:"#f59e0b"},
+    {id:"infra", label:"Infrastructure", count:allCoins.filter(c=>c.cat==="infra").length, color:"#8b5cf6"},
+    {id:"new",   label:"New Listings",   count:allCoins.filter(c=>c.isNew).length,         color:"#ef4444"},
+    {id:"watch", label:"Watchlist",      count:watchCoins.length},
   ];
 
   const filtered=(()=>{
     let list=
-      activeTab==="watch" ? watchCoins :
-      activeTab==="new"   ? allCoins.filter(c=>c.isNew) :
-      activeTab==="all"   ? allCoins :
+      activeTab==="watch"?watchCoins:
+      activeTab==="new"?allCoins.filter(c=>c.isNew):
+      activeTab==="all"?allCoins:
       allCoins.filter(c=>c.cat===activeTab);
-    return [...list].sort((a,b)=>{
-      if(sortBy==="otc")     return otcScore(b.mc,b.vol)-otcScore(a.mc,a.vol);
-      if(sortBy==="mc_asc")  return a.mc-b.mc;
-      if(sortBy==="mc_desc") return b.mc-a.mc;
-      if(sortBy==="vol")     return b.vol-a.vol;
-      if(sortBy==="change")  return (b.change24h||0)-(a.change24h||0);
+    return[...list].sort((a,b)=>{
+      if(sortBy==="otc")    return otcScore(b.mc,b.vol)-otcScore(a.mc,a.vol);
+      if(sortBy==="mc_asc") return a.mc-b.mc;
+      if(sortBy==="mc_desc")return b.mc-a.mc;
+      if(sortBy==="vol")    return b.vol-a.vol;
+      if(sortBy==="change") return(b.change24h||0)-(a.change24h||0);
       return 0;
     });
   })();
@@ -424,7 +418,6 @@ export default function App(){
   const selectTab=id=>{setActiveTab(id);setPage(0);setSideOpen(false);};
   const theme=Th(dark);
 
-  // ── sidebar ────────────────────────────────────────────────────
   const SidebarInner=()=>(
     <>
       <div style={{padding:"20px 18px 14px",display:"flex",alignItems:"center",gap:10}}>
@@ -459,18 +452,16 @@ export default function App(){
             <span style={{fontSize:12,fontWeight:600,color:theme.textMid}}>{v}</span>
           </div>
         ))}
-        {/* Reset seen history */}
-        <button onClick={resetSeen} style={{width:"100%",marginTop:10,padding:"7px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textDim,fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+        <button onClick={resetHistory} style={{width:"100%",marginTop:12,padding:"8px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textDim,fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
           Reset scan history
         </button>
-        <div style={{fontSize:10,color:theme.textDim,marginTop:5,lineHeight:1.4}}>
-          Use this if you've seen all available projects and want to start fresh
+        <div style={{fontSize:10,color:theme.textDim,marginTop:5,lineHeight:1.5,textAlign:"center"}}>
+          Use if you want to see previously shown projects again
         </div>
       </div>
     </>
   );
 
-  // ── row renderer ───────────────────────────────────────────────
   const renderRow=(coin,i,arr)=>{
     const chg=coin.change24h||0,vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
     const sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark);
@@ -545,14 +536,12 @@ export default function App(){
 
       {modalCoin&&<ProjectModal coin={modalCoin} dark={dark} onClose={()=>setModalCoin(null)} onToggleWatch={toggleWatch} isWatched={watchMap.has(modalCoin.id)}/>}
 
-      {/* Desktop sidebar */}
       <aside className="d-side" style={{width:220,background:theme.bgSide,borderRight:`1px solid ${theme.border}`,flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto",transition:"background 0.2s"}}>
         <SidebarInner/>
       </aside>
 
       {sideOpen&&<div onClick={()=>setSideOpen(false)} style={{position:"fixed",inset:0,background:theme.overlay,zIndex:40}}/>}
 
-      {/* Mobile drawer */}
       <aside className="m-side" style={{background:theme.bgSide,borderRight:`1px solid ${theme.border}`,boxShadow:"2px 0 20px rgba(0,0,0,0.15)",transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)"}}>
         <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 12px 0"}}>
           <button onClick={()=>setSideOpen(false)} style={{background:"transparent",border:"none",cursor:"pointer",color:theme.textMid,padding:6}}>
@@ -562,7 +551,6 @@ export default function App(){
         <SidebarInner/>
       </aside>
 
-      {/* Main */}
       <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
         <header style={{background:theme.headerBg,borderBottom:`1px solid ${theme.border}`,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,position:"sticky",top:0,zIndex:20,flexWrap:"wrap",transition:"background 0.2s"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -581,7 +569,7 @@ export default function App(){
                 :<svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
               }
             </button>
-            {visible.length>0&&(
+            {allCoins.length>0&&(
               <button onClick={()=>exportCSV(filtered)} style={{padding:"7px 13px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1px solid ${theme.border}`,background:theme.bgCard,color:theme.textMid,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 Export CSV
@@ -599,7 +587,6 @@ export default function App(){
               <strong>Notices:</strong> {errors.join(" · ")}
             </div>
           )}
-
           {newAlerts.length>0&&(
             <div style={{background:dark?"#1a0808":"#fff5f5",border:"1px solid #ef444430",borderRadius:10,padding:"14px 16px",marginBottom:16,animation:"fadeUp 0.3s ease"}}>
               <div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
@@ -612,13 +599,19 @@ export default function App(){
             </div>
           )}
 
+          {/* ── Original stat cards ── */}
           {allCoins.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:20,animation:"fadeUp 0.3s ease"}}>
-              {CG_CATS.map(cat=>(
-                <div key={cat.id} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:"14px 16px",borderTop:`3px solid ${cat.color}`,transition:"background 0.2s"}}>
-                  <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>{cat.label}</div>
-                  <div style={{fontSize:24,fontWeight:700,color:theme.text,lineHeight:1}}>{allCoins.filter(c=>c.cat===cat.id).length}</div>
-                  <div style={{fontSize:11,color:theme.textDim,marginTop:4}}>projects</div>
+              {[
+                {label:"Total found",  value:allCoins.length,                                       sub:"after all filters", accent:"#6366f1"},
+                {label:"Strong OTC",   value:allCoins.filter(c=>otcScore(c.mc,c.vol)>=5).length,    sub:"score 5–6 / 6",    accent:"#22c55e"},
+                {label:"New listings", value:allCoins.filter(c=>c.isNew).length,                    sub:"last 30 days",     accent:"#ef4444"},
+                {label:"Watchlist",    value:watchCoins.length,                                      sub:"saved projects",   accent:"#f59e0b"},
+              ].map(s=>(
+                <div key={s.label} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:"14px 16px",borderTop:`3px solid ${s.accent}`,transition:"background 0.2s"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>{s.label}</div>
+                  <div style={{fontSize:24,fontWeight:700,color:theme.text,lineHeight:1}}>{s.value}</div>
+                  <div style={{fontSize:11,color:theme.textDim,marginTop:4}}>{s.sub}</div>
                 </div>
               ))}
             </div>
@@ -652,7 +645,7 @@ export default function App(){
               </div>
               <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>Ready to scan</div>
               <div style={{fontSize:13,color:theme.textDim,maxWidth:340,margin:"0 auto",lineHeight:1.7}}>
-                Each scan returns exactly <strong style={{color:theme.accent}}>10 new projects per category</strong> (40 total) — projects you've already seen are excluded automatically.
+                Each scan returns <strong style={{color:theme.accent}}>10 projects per category</strong> (40 total). Already-seen projects are excluded automatically each scan.
               </div>
             </div>
           )}
