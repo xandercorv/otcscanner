@@ -1,9 +1,10 @@
 import { useState, useCallback } from "react";
 
-const MIN_MC    = 1_000_000;
-const MAX_MC    = 10_000_000;
-const MIN_VOL   = 400_000;
-const PER_CAT   = 10;
+// ── filters ────────────────────────────────────────────────────────
+const MIN_MC  = 1_000_000;
+const MAX_MC  = 50_000_000;  // raised to $50M
+const MIN_VOL = 400_000;
+const MAX_VOL = 7_000_000;   // capped at $7M
 
 const CG_CATS = [
   { id:"defi",  label:"DeFi",           cgId:"decentralized-finance-defi", color:"#6366f1" },
@@ -20,11 +21,11 @@ const SORT_OPTIONS = [
   { value:"change",  label:"24h Change"   },
 ];
 
-// ── localStorage ──────────────────────────────────────────────────
+// ── localStorage ───────────────────────────────────────────────────
 function lsGet(key,fb){ try{ const v=localStorage.getItem(key); return v?JSON.parse(v):fb; }catch{ return fb; } }
 function lsSet(key,val){ try{ localStorage.setItem(key,JSON.stringify(val)); }catch{} }
 
-// ── shuffle array ─────────────────────────────────────────────────
+// ── shuffle ────────────────────────────────────────────────────────
 function shuffle(arr){
   const a=[...arr];
   for(let i=a.length-1;i>0;i--){
@@ -32,6 +33,11 @@ function shuffle(arr){
     [a[i],a[j]]=[a[j],a[i]];
   }
   return a;
+}
+
+// ── coin filter ────────────────────────────────────────────────────
+function qualifies(mc, vol){
+  return mc>=MIN_MC && mc<=MAX_MC && vol>=MIN_VOL && vol<=MAX_VOL;
 }
 
 // ── theme ──────────────────────────────────────────────────────────
@@ -72,9 +78,9 @@ const fmtPrice=n=>{
 function otcScore(mc,vol){
   let s=0;
   if(mc>=MIN_MC&&mc<=MAX_MC) s+=3;
-  if(vol>=MIN_VOL)           s+=1;
+  if(vol>=MIN_VOL&&vol<=MAX_VOL) s+=1;
   if(vol>0&&mc>0&&vol/mc<0.1) s+=1;
-  if(mc<5_000_000)           s+=1;
+  if(mc<10_000_000) s+=1;
   return Math.min(s,6);
 }
 function scoreInfo(s,dark){
@@ -89,10 +95,8 @@ function projectURL(coin){
 }
 
 // ── API ────────────────────────────────────────────────────────────
-// Fetch ONE category from CG across multiple pages to build a large pool
 async function fetchCGPool(cat){
   const pool=[];
-  // Try pages 1 through 4 to get a big enough pool
   for(const page of[1,2,3,4]){
     try{
       const qs=new URLSearchParams({
@@ -105,7 +109,7 @@ async function fetchCGPool(cat){
       const data=await res.json();
       if(!Array.isArray(data)||data.length===0) break;
       const batch=data
-        .filter(c=>c.market_cap>=MIN_MC&&c.market_cap<=MAX_MC&&(c.total_volume||0)>=MIN_VOL)
+        .filter(c=>qualifies(c.market_cap, c.total_volume||0))
         .map(c=>({
           id:"cg_"+c.id,rawId:c.id,
           name:c.name,symbol:(c.symbol||"").toUpperCase(),
@@ -114,8 +118,6 @@ async function fetchCGPool(cat){
           cat:cat.id,source:"CoinGecko",isNew:false,
         }));
       pool.push(...batch);
-      // If we already have enough candidates stop early
-      if(pool.length>=40) break;
       await new Promise(r=>setTimeout(r,800));
     }catch(e){ break; }
   }
@@ -125,7 +127,7 @@ async function fetchCGPool(cat){
 async function fetchCMCPool(){
   const pool=[];
   const now=Date.now();
-  for(const start of[1,201,401]){
+  for(const start of[1,201,401,601]){
     try{
       const qs=new URLSearchParams({
         limit:"200",start:String(start),convert:"USD",
@@ -137,7 +139,7 @@ async function fetchCMCPool(){
       const batch=(data.data||[])
         .filter(c=>{
           const mc=c.quote?.USD?.market_cap||0,vol=c.quote?.USD?.volume_24h||0;
-          return mc>=MIN_MC&&mc<=MAX_MC&&vol>=MIN_VOL;
+          return qualifies(mc,vol);
         })
         .map(c=>{
           const q=c.quote?.USD||{};
@@ -167,19 +169,17 @@ function guessCat(tags){
   return"other";
 }
 
-// Pick N unseen items from pool. If not enough unseen, reset seen and pick from all.
-function pickUnseen(pool,seenSet,n){
+// Return all unseen coins from pool. If all seen, reset and return all.
+function getUnseen(pool, seenSet){
   const unseen=pool.filter(c=>!seenSet.has(c.rawId));
-  if(unseen.length>=n){
-    const picked=shuffle(unseen).slice(0,n);
-    picked.forEach(c=>seenSet.add(c.rawId));
-    return picked;
+  if(unseen.length>0){
+    unseen.forEach(c=>seenSet.add(c.rawId));
+    return shuffle(unseen);
   }
-  // Not enough unseen — reset and pick from entire pool
+  // All seen — reset this category
   seenSet.clear();
-  const picked=shuffle(pool).slice(0,n);
-  picked.forEach(c=>seenSet.add(c.rawId));
-  return picked;
+  pool.forEach(c=>seenSet.add(c.rawId));
+  return shuffle(pool);
 }
 
 function exportCSV(coins){
@@ -283,7 +283,6 @@ export default function App(){
   const [page,      setPage]     =useState(0);
   const [modalCoin, setModalCoin]=useState(null);
 
-  // Watchmap stores full coin objects — survives clear scan
   const [watchMap,setWatchMapRaw]=useState(()=>new Map(lsGet("otc_watchmap",[])));
   const setWatchMap=fn=>{
     setWatchMapRaw(prev=>{
@@ -298,9 +297,8 @@ export default function App(){
     return next;
   });
 
-  // Seen IDs per category — persisted across sessions
   const loadSeen=()=>{
-    const raw=lsGet("otc_seen2",{});
+    const raw=lsGet("otc_seen3",{});
     const out={};
     for(const cat of CG_CATS) out[cat.id]=new Set(raw[cat.id]||[]);
     return out;
@@ -308,7 +306,7 @@ export default function App(){
   const saveSeen=seenByCat=>{
     const out={};
     for(const cat of CG_CATS) out[cat.id]=[...seenByCat[cat.id]];
-    lsSet("otc_seen2",out);
+    lsSet("otc_seen3",out);
   };
 
   const persist=(coins,errs,alerts,ts)=>{
@@ -322,53 +320,46 @@ export default function App(){
     if(scanning) return;
     setScanning(true);
     setAllCoins([]); lsSet("otc_coins",[]);
-    setErrors([]);
-    setNewAlerts([]);
-    setPage(0);
+    setErrors([]); setNewAlerts([]); setPage(0);
 
     const seenByCat=loadSeen();
     const errs=[];
     const result=[];
     const newOnes=[];
 
-    // Fetch CMC pool once upfront
+    // Fetch CMC pool once
     setProgress("Fetching CMC pool…");
     let cmcPool=[];
     try{ cmcPool=await fetchCMCPool(); }
     catch(e){ errs.push(`CMC: ${e.message}`); }
 
-    // Per category: build pool from CG + relevant CMC coins, pick 10 unseen
+    // Per category: build full pool, return all unseen
     for(let ci=0;ci<CG_CATS.length;ci++){
       const cat=CG_CATS[ci];
-      setProgress(`Building ${cat.label} pool… (${ci+1}/${CG_CATS.length})`);
+      setProgress(`Fetching ${cat.label}… (${ci+1}/${CG_CATS.length})`);
 
-      // Fetch CG pool for this category
       let cgPool=[];
       try{ cgPool=await fetchCGPool(cat); }
       catch(e){ errs.push(`CG/${cat.label}: ${e.message}`); }
 
-      // Add CMC coins for this category (exclude symbols already in cgPool)
+      // Merge CMC coins for this category (no CG duplicate symbols)
       const cgSymbols=new Set(cgPool.map(c=>c.symbol));
       const cmcForCat=cmcPool.filter(c=>c.cat===cat.id&&!cgSymbols.has(c.symbol));
-
-      // Combined pool for this category
       const pool=[...cgPool,...cmcForCat];
 
       if(pool.length===0){
-        errs.push(`${cat.label}: No qualifying projects found`);
+        errs.push(`${cat.label}: No qualifying projects found with current filters`);
         continue;
       }
 
-      // Pick PER_CAT unseen from pool (auto-resets if exhausted)
-      const picked=pickUnseen(pool,seenByCat[cat.id],PER_CAT);
-      picked.forEach(c=>{ if(c.isNew) newOnes.push(c); });
-      result.push(...picked);
+      // Get all unseen (auto-resets if exhausted)
+      const unseen=getUnseen(pool, seenByCat[cat.id]);
+      unseen.forEach(c=>{ if(c.isNew) newOnes.push(c); });
+      result.push(...unseen);
     }
 
-    // Save updated seen history
     saveSeen(seenByCat);
-
-    persist(result,errs,newOnes.slice(0,10),new Date());
+    persist(result, errs, newOnes.slice(0,10), new Date());
     setScanning(false);
     setProgress("");
   },[scanning]);
@@ -381,7 +372,7 @@ export default function App(){
     setPage(0);
   };
   const clearWatchlist=()=>setWatchMap(new Map());
-  const resetHistory=()=>{ lsSet("otc_seen2",{}); };
+  const resetHistory=()=>lsSet("otc_seen3",{});
 
   const watchCoins=[...watchMap.values()];
 
@@ -446,7 +437,7 @@ export default function App(){
       </div>
       <div style={{borderTop:`1px solid ${theme.border}`,padding:"14px 18px",marginTop:8}}>
         <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10}}>Active Filters</div>
-        {[["Market cap","$1M – $10M"],["Min 24h vol","≥ $400K"],["Per category","10 projects"]].map(([k,v])=>(
+        {[["Market cap","$1M – $50M"],["Volume (24h)","$400K – $7M"]].map(([k,v])=>(
           <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
             <span style={{fontSize:12,color:theme.textDim}}>{k}</span>
             <span style={{fontSize:12,fontWeight:600,color:theme.textMid}}>{v}</span>
@@ -456,7 +447,7 @@ export default function App(){
           Reset scan history
         </button>
         <div style={{fontSize:10,color:theme.textDim,marginTop:5,lineHeight:1.5,textAlign:"center"}}>
-          Use if you want to see previously shown projects again
+          Tap to see previously shown projects again
         </div>
       </div>
     </>
@@ -599,7 +590,6 @@ export default function App(){
             </div>
           )}
 
-          {/* ── Original stat cards ── */}
           {allCoins.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:20,animation:"fadeUp 0.3s ease"}}>
               {[
@@ -645,7 +635,7 @@ export default function App(){
               </div>
               <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>Ready to scan</div>
               <div style={{fontSize:13,color:theme.textDim,maxWidth:340,margin:"0 auto",lineHeight:1.7}}>
-                Each scan returns <strong style={{color:theme.accent}}>10 projects per category</strong> (40 total). Already-seen projects are excluded automatically each scan.
+                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull projects from CoinGecko + CMC. Each scan returns fresh projects you haven't seen before.
               </div>
             </div>
           )}
