@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 // No API keys here — they live in .env.local (local) or Vercel dashboard (production)
 
@@ -15,13 +15,36 @@ const CG_CATS = [
 ];
 
 const SORT_OPTIONS = [
-  { value:"otc",     label:"OTC Score"    },
-  { value:"mc_asc",  label:"Market Cap ↑" },
-  { value:"mc_desc", label:"Market Cap ↓" },
-  { value:"vol",     label:"Volume ↓"     },
-  { value:"change",  label:"24h Change"   },
+  { value:"shuffle", label:"Shuffled (random)"  },
+  { value:"otc",     label:"OTC Score"           },
+  { value:"mc_asc",  label:"Market Cap ↑"        },
+  { value:"mc_desc", label:"Market Cap ↓"        },
+  { value:"vol",     label:"Volume ↓"            },
+  { value:"change",  label:"24h Change"          },
 ];
 
+// ── localStorage helpers ───────────────────────────────────────────
+function lsGet(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : fallback;
+  } catch { return fallback; }
+}
+function lsSet(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+
+// ── Fisher-Yates shuffle ───────────────────────────────────────────
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ── theme ──────────────────────────────────────────────────────────
 function Th(dark) {
   return dark ? {
     bg:"#0f0f1a", bgSide:"#0a0a14", bgCard:"#13131f", bgHov:"#1a1a2e",
@@ -42,6 +65,7 @@ function Th(dark) {
   };
 }
 
+// ── helpers ────────────────────────────────────────────────────────
 const fmtUSD = n => {
   if (!n&&n!==0) return "—";
   if (n>=1e9) return "$"+(n/1e9).toFixed(2)+"B";
@@ -57,10 +81,10 @@ const fmtPrice = n => {
 };
 function otcScore(mc,vol){
   let s=0;
-  if(mc>=MIN_MC&&mc<=MAX_MC) s+=3;
-  if(vol>=MIN_VOL)           s+=1;
+  if(mc>=MIN_MC&&mc<=MAX_MC)   s+=3;
+  if(vol>=MIN_VOL)             s+=1;
   if(vol>0&&mc>0&&vol/mc<0.1) s+=1;
-  if(mc<5_000_000)           s+=1;
+  if(mc<5_000_000)            s+=1;
   return Math.min(s,6);
 }
 function scoreInfo(s,dark){
@@ -74,7 +98,7 @@ function projectURL(coin){
   return `https://www.coingecko.com/en/coins/${coin.rawId}`;
 }
 
-// ── API — calls our own /api routes (proxy locally, serverless on Vercel) ──
+// ── API ────────────────────────────────────────────────────────────
 async function fetchCG(cat) {
   const qs = new URLSearchParams({
     vs_currency:"usd", category:cat.cgId,
@@ -120,8 +144,7 @@ async function fetchCMC() {
         image:`https://s2.coinmarketcap.com/static/img/coins/64x64/${c.id}.png`,
         mc:q.market_cap||0, price:q.price||0, vol:q.volume_24h||0,
         change24h:q.percent_change_24h||0,
-        cat:guessCat(c.tags||[]), source:"CMC",
-        isNew:ageDays<=30,
+        cat:guessCat(c.tags||[]), source:"CMC", isNew:ageDays<=30,
       };
     });
 }
@@ -149,14 +172,13 @@ function Spinner(){
 // ── Modal ──────────────────────────────────────────────────────────
 function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
   const theme=Th(dark);
-  const sc=otcScore(coin.mc,coin.vol), si=scoreInfo(sc,dark);
-  const cat=catInfo(coin.cat), chg=coin.change24h||0;
+  const sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark);
+  const cat=catInfo(coin.cat),chg=coin.change24h||0;
   const vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
-  const url=projectURL(coin), isCMC=coin.source==="CMC";
+  const url=projectURL(coin),isCMC=coin.source==="CMC";
   return(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:theme.overlay,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div onClick={e=>e.stopPropagation()} style={{background:theme.modalBg,border:`1px solid ${theme.border}`,borderRadius:16,width:"100%",maxWidth:420,boxShadow:"0 25px 60px rgba(0,0,0,0.3)",animation:"modalIn 0.2s cubic-bezier(0.34,1.56,0.64,1)",overflow:"hidden"}}>
-        {/* Header */}
         <div style={{background:`linear-gradient(135deg,${cat.color}22,${cat.color}08)`,borderBottom:`1px solid ${theme.border}`,padding:"20px 20px 16px",display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
             <img src={coin.image} alt={coin.name} width={52} height={52} style={{borderRadius:"50%",border:`2px solid ${cat.color}40`,flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
@@ -178,7 +200,6 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
           </button>
         </div>
-        {/* OTC score bar */}
         <div style={{padding:"14px 20px",borderBottom:`1px solid ${theme.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{fontSize:11,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em"}}>OTC Score</div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -190,15 +211,14 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
             </span>
           </div>
         </div>
-        {/* Stats */}
         <div style={{padding:"16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {label:"Market Cap",    value:fmtUSD(coin.mc)},
-            {label:"Price",         value:fmtPrice(coin.price)},
-            {label:"24h Change",    value:(chg>=0?"+":"")+chg.toFixed(2)+"%", color:chg>=0?"#22c55e":"#ef4444"},
-            {label:"Volume (24h)",  value:fmtUSD(coin.vol)},
-            {label:"Vol / MC",      value:vr!=="—"?vr+"%":"—"},
-            {label:"Category",      value:cat.label, color:cat.color},
+            {label:"Market Cap",  value:fmtUSD(coin.mc)},
+            {label:"Price",       value:fmtPrice(coin.price)},
+            {label:"24h Change",  value:(chg>=0?"+":"")+chg.toFixed(2)+"%", color:chg>=0?"#22c55e":"#ef4444"},
+            {label:"Volume (24h)",value:fmtUSD(coin.vol)},
+            {label:"Vol / MC",    value:vr!=="—"?vr+"%":"—"},
+            {label:"Category",    value:cat.label, color:cat.color},
           ].map(row=>(
             <div key={row.label} style={{background:theme.statBg,borderRadius:9,padding:"12px 14px",border:`1px solid ${theme.border}`}}>
               <div style={{fontSize:10,color:theme.textDim,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:5}}>{row.label}</div>
@@ -206,7 +226,6 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
             </div>
           ))}
         </div>
-        {/* Actions */}
         <div style={{padding:"0 20px 20px",display:"flex",gap:8,flexDirection:"column"}}>
           <a href={url} target="_blank" rel="noopener noreferrer"
             style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"11px 16px",borderRadius:9,background:isCMC?"linear-gradient(135deg,#3b48ff,#6366f1)":"linear-gradient(135deg,#2ec97b,#10b981)",color:"#fff",fontSize:13,fontWeight:700,textDecoration:"none"}}
@@ -227,25 +246,43 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
 
 // ── main ───────────────────────────────────────────────────────────
 export default function App(){
-  const [dark,      setDark]      = useState(false);
+  const [dark,      setDark]      = useState(()=>lsGet("otc_dark", false));
   const [sideOpen,  setSideOpen]  = useState(false);
-  const [allCoins,  setAllCoins]  = useState([]);
+
+  // ── persisted state (survives refresh) ──
+  const [allCoins,  setAllCoinsRaw]  = useState(()=>lsGet("otc_coins", []));
+  const [watchlist, setWatchlistRaw] = useState(()=>new Set(lsGet("otc_watchlist", [])));
+  const [errors,    setErrors]    = useState(()=>lsGet("otc_errors", []));
+  const [lastScan,  setLastScanRaw] = useState(()=>{ const v=lsGet("otc_lastscan",null); return v?new Date(v):null; });
+  const [newAlerts, setNewAlertsRaw]= useState(()=>lsGet("otc_alerts",[]));
+
+  // wrap setters to also persist
+  const setAllCoins = val => { setAllCoinsRaw(val); lsSet("otc_coins", val); };
+  const setWatchlist = fn => {
+    setWatchlistRaw(prev => {
+      const next = typeof fn === "function" ? fn(prev) : fn;
+      lsSet("otc_watchlist", [...next]);
+      return next;
+    });
+  };
+  const setLastScan = val => { setLastScanRaw(val); lsSet("otc_lastscan", val?.toISOString()||null); };
+  const setNewAlerts = val => { setNewAlertsRaw(val); lsSet("otc_alerts", val); };
+
   const [page,      setPage]      = useState(0);
-  const [watchlist, setWatchlist] = useState(new Set());
   const [activeTab, setActiveTab] = useState("all");
-  const [sortBy,    setSortBy]    = useState("otc");
+  const [sortBy,    setSortBy]    = useState("shuffle");
   const [scanning,  setScanning]  = useState(false);
   const [progress,  setProgress]  = useState("");
-  const [errors,    setErrors]    = useState([]);
-  const [lastScan,  setLastScan]  = useState(null);
-  const [newAlerts, setNewAlerts] = useState([]);
   const [modalCoin, setModalCoin] = useState(null);
-  const theme=Th(dark);
+
+  // persist dark mode
+  useEffect(()=>{ lsSet("otc_dark", dark); },[dark]);
 
   const scan=useCallback(async()=>{
     if(scanning) return;
     setScanning(true); setErrors([]); setNewAlerts([]); setAllCoins([]);
     const fetched=[],errs=[];
+
     for(let i=0;i<CG_CATS.length;i++){
       const cat=CG_CATS[i];
       setProgress(`CoinGecko: ${cat.label} (${i+1}/${CG_CATS.length})`);
@@ -253,6 +290,7 @@ export default function App(){
       try   { fetched.push(...await fetchCG(cat)); }
       catch(e){ errs.push(`CG/${cat.label}: ${e.message}`); }
     }
+
     const cgSyms=new Set(fetched.map(c=>c.symbol.toUpperCase()));
     setProgress("CMC: fetching listings…");
     await new Promise(r=>setTimeout(r,800));
@@ -266,13 +304,39 @@ export default function App(){
       }
       if(newOnes.length) setNewAlerts(newOnes.slice(0,10));
     }catch(e){ errs.push(`CMC: ${e.message}`); }
+
+    // deduplicate
     const seen=new Set();
-    const deduped = fetched.filter(c=>{if(seen.has(c.rawId))return false;seen.add(c.rawId);return true;});
-    const shuffled = deduped.sort(() => Math.random() - 0.5);
+    const deduped=fetched.filter(c=>{if(seen.has(c.rawId))return false;seen.add(c.rawId);return true;});
+
+    // always shuffle so every scan feels different
+    const shuffled=shuffle(deduped);
+
     setAllCoins(shuffled);
-    setPage(0); setErrors(errs); setLastScan(new Date());
-    setProgress(""); setScanning(false);
+    setPage(0);
+    setErrors(errs);
+    setLastScan(new Date());
+    setProgress("");
+    setScanning(false);
   },[scanning]);
+
+  // clear scan results only — watchlist untouched
+  const clearScan = () => {
+    setAllCoins([]);
+    setPage(0);
+    setErrors([]);
+    setNewAlerts([]);
+    setLastScan(null);
+    lsSet("otc_coins",[]);
+    lsSet("otc_errors",[]);
+    lsSet("otc_alerts",[]);
+    lsSet("otc_lastscan",null);
+  };
+
+  // clear watchlist only
+  const clearWatchlist = () => {
+    setWatchlist(new Set());
+  };
 
   const tabs=[
     {id:"all",   label:"All projects",   count:allCoins.length},
@@ -285,7 +349,13 @@ export default function App(){
   ];
 
   const filtered=(()=>{
-    let list=activeTab==="watch"?allCoins.filter(c=>watchlist.has(c.id)):activeTab==="new"?allCoins.filter(c=>c.isNew):activeTab==="all"?allCoins:allCoins.filter(c=>c.cat===activeTab);
+    let list=
+      activeTab==="watch" ? allCoins.filter(c=>watchlist.has(c.id)) :
+      activeTab==="new"   ? allCoins.filter(c=>c.isNew) :
+      activeTab==="all"   ? allCoins :
+      allCoins.filter(c=>c.cat===activeTab);
+
+    if(sortBy==="shuffle") return list; // already shuffled at scan time
     return [...list].sort((a,b)=>{
       if(sortBy==="otc")     return otcScore(b.mc,b.vol)-otcScore(a.mc,a.vol);
       if(sortBy==="mc_asc")  return a.mc-b.mc;
@@ -301,6 +371,7 @@ export default function App(){
   const hasMore=pageStart+PAGE_SIZE<filtered.length;
   const toggleWatch=id=>setWatchlist(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const selectTab=id=>{setActiveTab(id);setPage(0);setSideOpen(false);};
+  const theme=Th(dark);
 
   const SidebarInner=()=>(
     <>
@@ -414,6 +485,7 @@ export default function App(){
               <strong>Notices:</strong> {errors.join(" · ")}
             </div>
           )}
+
           {newAlerts.length>0&&(
             <div style={{background:dark?"#1a0808":"#fff5f5",border:"1px solid #ef444430",borderRadius:10,padding:"14px 16px",marginBottom:16,animation:"fadeUp 0.3s ease"}}>
               <div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
@@ -425,6 +497,7 @@ export default function App(){
               </div>
             </div>
           )}
+
           {allCoins.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:20,animation:"fadeUp 0.3s ease"}}>
               {[
@@ -441,17 +514,34 @@ export default function App(){
               ))}
             </div>
           )}
+
+          {/* Sort + controls bar */}
           {filtered.length>0&&(
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,flexWrap:"wrap"}}>
               <span style={{fontSize:12,color:theme.textDim}}>Sort by</span>
               <select value={sortBy} onChange={e=>{setSortBy(e.target.value);setPage(0);}} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:theme.textMid,cursor:"pointer"}}>
                 {SORT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-              <span style={{fontSize:11,color:theme.textDim,marginLeft:4}}>Click any row to view details</span>
+              <span style={{fontSize:11,color:theme.textDim}}>· Click any row to view details</span>
               <span style={{marginLeft:"auto",fontSize:12,color:theme.textDim}}>{Math.min(pageStart+1,filtered.length)}–{Math.min(pageStart+PAGE_SIZE,filtered.length)} of {filtered.length}</span>
-              <button onClick={()=>{setAllCoins([]);setPage(0);setErrors([]);setNewAlerts([]);setLastScan(null);}} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textMid,fontSize:12,cursor:"pointer",fontWeight:600}}>Clear all</button>
+
+              {/* Watchlist tab — clear watchlist button */}
+              {activeTab==="watch"&&watchlist.size>0&&(
+                <button onClick={clearWatchlist} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #ef444430",background:dark?"#1a0808":"#fff5f5",color:"#ef4444",fontSize:12,cursor:"pointer",fontWeight:600}}>
+                  Clear watchlist
+                </button>
+              )}
+
+              {/* All other tabs — clear scan button */}
+              {activeTab!=="watch"&&allCoins.length>0&&(
+                <button onClick={clearScan} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textMid,fontSize:12,cursor:"pointer",fontWeight:600}}>
+                  Clear scan
+                </button>
+              )}
             </div>
           )}
+
+          {/* Empty state */}
           {!scanning&&allCoins.length===0&&(
             <div style={{textAlign:"center",padding:"80px 20px",animation:"fadeUp 0.3s ease"}}>
               <div style={{width:56,height:56,borderRadius:14,background:theme.accentBg,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>
@@ -459,11 +549,12 @@ export default function App(){
               </div>
               <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>Ready to scan</div>
               <div style={{fontSize:13,color:theme.textDim,maxWidth:300,margin:"0 auto",lineHeight:1.7}}>
-                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects. Results show 10 at a time.
+                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects. Each scan brings a different random selection.
               </div>
             </div>
           )}
-          {activeTab==="watch"&&watchlist.size===0&&allCoins.length>0&&(
+
+          {activeTab==="watch"&&watchlist.size===0&&(
             <div style={{textAlign:"center",padding:"60px 0",color:theme.textDim,fontSize:13}}>No saved projects — click any row then Save to Watchlist.</div>
           )}
 
@@ -545,7 +636,7 @@ export default function App(){
           {visible.length>0&&(
             <div className="mob-cards">
               {visible.map(coin=>{
-                const chg=coin.change24h||0,sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark),cat=catInfo(coin.cat),isW=watchlist.has(coin.id);
+                const chg=coin.change24h||0,sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark),cat=catInfo(coin.cat);
                 return(
                   <div key={coin.id} onClick={()=>setModalCoin(coin)} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:14,marginBottom:10,cursor:"pointer",transition:"border-color 0.15s"}}
                     onMouseEnter={e=>e.currentTarget.style.borderColor=theme.accent+"60"}
