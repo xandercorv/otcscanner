@@ -1,109 +1,187 @@
 import { useState, useCallback } from "react";
 
-const MIN_MC  = 1_000_000;
-const MAX_MC  = 50_000_000;
-const MIN_VOL = 400_000;
-const MAX_VOL = 7_000_000;
-
-const CG_CATS = [
-  { id:"defi",  label:"DeFi",           cgId:"decentralized-finance-defi", color:"#6366f1" },
-  { id:"ai",    label:"AI + Crypto",    cgId:"artificial-intelligence",    color:"#10b981" },
-  { id:"meme",  label:"Memes",          cgId:"meme-token",                 color:"#f59e0b" },
-  { id:"infra", label:"Infrastructure", cgId:"infrastructure",             color:"#8b5cf6" },
+// ── sectors ────────────────────────────────────────────────────────
+const SECTORS = [
+  { id:"defi",  label:"DeFi",           cgId:"decentralized-finance-defi",  color:"#6366f1" },
+  { id:"ai",    label:"AI + Crypto",    cgId:"artificial-intelligence",     color:"#10b981" },
+  { id:"meme",  label:"Memes",          cgId:"meme-token",                  color:"#f59e0b" },
+  { id:"infra", label:"Infrastructure", cgId:"infrastructure",              color:"#8b5cf6" },
+  { id:"rwa",   label:"RWA",            cgId:"real-world-assets-rwa",       color:"#06b6d4" },
 ];
 
-const SORT_OPTIONS = [
-  { value:"otc",     label:"OTC Score"    },
-  { value:"mc_asc",  label:"Market Cap ↑" },
-  { value:"mc_desc", label:"Market Cap ↓" },
-  { value:"vol",     label:"Volume ↓"     },
-  { value:"change",  label:"24h Change"   },
+// ── OTC criteria ───────────────────────────────────────────────────
+// Auto = scored from API data. Manual = user checks in project modal.
+const CRITERIA = [
+  {
+    id:"c1", num:1, auto:true,
+    title:"Listed but Underserved",
+    desc:"Ranked within top 2,500 on CoinGecko or CMC",
+    short:"Top 2500",
+  },
+  {
+    id:"c2", num:2, auto:true,
+    title:"High MC, Low Volume",
+    desc:"Daily volume < 10% of market cap — cannot sell large amounts without crashing price",
+    short:"Vol < 10% MC",
+  },
+  {
+    id:"c3", num:3, auto:true,
+    title:"Low Circulating vs Total Supply",
+    desc:"Circulating supply is 20–60% of total supply — large portion locked for team/treasury",
+    short:"Low Circ %",
+  },
+  {
+    id:"c4", num:4, auto:false,
+    title:"Upcoming Token Unlocks / Cliff",
+    desc:"Large token unlock announcements or cliff releases coming — teams prefer OTC to offload safely",
+    short:"Token Unlock",
+  },
+  {
+    id:"c5", num:5, auto:false,
+    title:"High Whale Concentration",
+    desc:"Top 10 wallets hold 40–70% of supply — team won't want to sell publicly",
+    short:"Whale Conc.",
+  },
+  {
+    id:"c6", num:6, auto:true,
+    title:"FDV Much Higher Than Market Cap",
+    desc:"FDV is 3x+ the market cap — majority of tokens not yet circulating, team will need OTC",
+    short:"FDV > 3x MC",
+  },
+  {
+    id:"c7", num:7, auto:false,
+    title:"Weak Exchange Liquidity",
+    desc:"Thin order book — a $200K sell can crash price significantly. Team will choose OTC to protect price",
+    short:"Thin Liquidity",
+  },
 ];
 
+const AUTO_CRITERIA = CRITERIA.filter(c=>c.auto);
+const MANUAL_CRITERIA = CRITERIA.filter(c=>!c.auto);
+
+// ── localStorage ───────────────────────────────────────────────────
 function lsGet(key,fb){ try{ const v=localStorage.getItem(key); return v?JSON.parse(v):fb; }catch{ return fb; } }
 function lsSet(key,val){ try{ localStorage.setItem(key,JSON.stringify(val)); }catch{} }
 
-function qualifies(mc,vol){
-  return mc>=MIN_MC && mc<=MAX_MC && vol>=MIN_VOL && vol<=MAX_VOL;
-}
-
+// ── theme ──────────────────────────────────────────────────────────
 function Th(dark){
   return dark?{
-    bg:"#0f0f1a",bgSide:"#0a0a14",bgCard:"#13131f",bgHov:"#1a1a2e",
-    border:"#1e1e35",borderMid:"#2a2a45",
-    text:"#e8e8ff",textMid:"#9090c0",textDim:"#4a4a6a",
-    accent:"#6366f1",accentBg:"#6366f115",accentTxt:"#a5b4fc",
-    navAct:"#6366f118",navActTxt:"#a5b4fc",
-    statBg:"#0d0d1a",headerBg:"#0a0a14",
-    shadow:"0 1px 3px rgba(0,0,0,0.5)",overlay:"rgba(0,0,0,0.75)",modalBg:"#13131f",
+    bg:"#0f0f1a", bgSide:"#0a0a14", bgCard:"#13131f", bgHov:"#1a1a2e",
+    border:"#1e1e35", borderMid:"#2a2a45",
+    text:"#e8e8ff", textMid:"#9090c0", textDim:"#4a4a6a",
+    accent:"#6366f1", accentBg:"#6366f115", accentTxt:"#a5b4fc",
+    navAct:"#6366f118", navActTxt:"#a5b4fc",
+    statBg:"#0d0d1a", headerBg:"#0a0a14",
+    overlay:"rgba(0,0,0,0.8)", modalBg:"#13131f",
+    green:"#22c55e", greenBg:"#052e16", greenText:"#4ade80",
+    amber:"#f59e0b", amberBg:"#1c1400", amberText:"#fbbf24",
+    red:"#ef4444", redBg:"#1a0808", redText:"#fca5a5",
   }:{
-    bg:"#f5f5f8",bgSide:"#ffffff",bgCard:"#ffffff",bgHov:"#f9f9fc",
-    border:"#e8e8f0",borderMid:"#d0d0e0",
-    text:"#111827",textMid:"#6b7280",textDim:"#9ca3af",
-    accent:"#6366f1",accentBg:"#6366f110",accentTxt:"#6366f1",
-    navAct:"#6366f110",navActTxt:"#6366f1",
-    statBg:"#f9f9fc",headerBg:"#ffffff",
-    shadow:"0 1px 3px rgba(0,0,0,0.07)",overlay:"rgba(0,0,0,0.5)",modalBg:"#ffffff",
+    bg:"#f5f5f8", bgSide:"#ffffff", bgCard:"#ffffff", bgHov:"#f9f9fc",
+    border:"#e8e8f0", borderMid:"#d0d0e0",
+    text:"#111827", textMid:"#6b7280", textDim:"#9ca3af",
+    accent:"#6366f1", accentBg:"#6366f110", accentTxt:"#6366f1",
+    navAct:"#6366f110", navActTxt:"#6366f1",
+    statBg:"#f9f9fc", headerBg:"#ffffff",
+    overlay:"rgba(0,0,0,0.5)", modalBg:"#ffffff",
+    green:"#16a34a", greenBg:"#dcfce7", greenText:"#166534",
+    amber:"#d97706", amberBg:"#fef3c7", amberText:"#92400e",
+    red:"#dc2626", redBg:"#fef2f2", redText:"#991b1b",
   };
 }
 
+// ── helpers ────────────────────────────────────────────────────────
 const fmtUSD=n=>{
-  if(!n&&n!==0)return"—";
-  if(n>=1e9)return"$"+(n/1e9).toFixed(2)+"B";
-  if(n>=1e6)return"$"+(n/1e6).toFixed(2)+"M";
-  if(n>=1e3)return"$"+(n/1e3).toFixed(1)+"K";
-  return"$"+n.toFixed(4);
+  if(!n&&n!==0) return"—";
+  if(n>=1e9) return"$"+(n/1e9).toFixed(2)+"B";
+  if(n>=1e6) return"$"+(n/1e6).toFixed(2)+"M";
+  if(n>=1e3) return"$"+(n/1e3).toFixed(1)+"K";
+  return"$"+n.toFixed(2);
 };
 const fmtPrice=n=>{
-  if(!n&&n!==0)return"—";
-  if(n>=1)return"$"+n.toFixed(3);
-  if(n>=0.01)return"$"+n.toFixed(4);
+  if(!n&&n!==0) return"—";
+  if(n>=1) return"$"+n.toFixed(3);
+  if(n>=0.01) return"$"+n.toFixed(4);
   return"$"+n.toExponential(2);
 };
-function otcScore(mc,vol){
-  let s=0;
-  if(mc>=MIN_MC&&mc<=MAX_MC) s+=3;
-  if(vol>=MIN_VOL&&vol<=MAX_VOL) s+=1;
-  if(vol>0&&mc>0&&vol/mc<0.1) s+=1;
-  if(mc<10_000_000) s+=1;
-  return Math.min(s,6);
-}
-function scoreInfo(s,dark){
-  if(s>=5)return{label:"Strong",bg:dark?"#052e16":"#dcfce7",text:dark?"#4ade80":"#166534",dot:"#22c55e"};
-  if(s>=3)return{label:"Good",bg:dark?"#1c1400":"#fef9c3",text:dark?"#fbbf24":"#854d0e",dot:"#f59e0b"};
-  return{label:"Weak",bg:dark?"#1a1a2e":"#f3f4f6",text:dark?"#6b7280":"#6b7280",dot:"#9ca3af"};
-}
-function catInfo(id){ return CG_CATS.find(c=>c.id===id)||{label:id,color:"#6366f1"}; }
+const pct=(a,b)=>b>0?((a/b)*100).toFixed(1)+"%":"—";
+
+function sectorInfo(id){ return SECTORS.find(s=>s.id===id)||{label:id,color:"#6366f1"}; }
+
 function projectURL(coin){
-  if(coin.source==="CMC")return`https://coinmarketcap.com/currencies/${coin.name.toLowerCase().replace(/\s+/g,"-")}/`;
+  if(coin.source==="CMC") return`https://coinmarketcap.com/currencies/${coin.name.toLowerCase().replace(/\s+/g,"-")}/`;
   return`https://www.coingecko.com/en/coins/${coin.rawId}`;
 }
 
-// ── simple fetchers ────────────────────────────────────────────────
-async function fetchCGCat(cat){
+// ── auto-score from API data ───────────────────────────────────────
+function autoScore(coin){
+  const met={};
+  // C1: ranked within top 2500
+  met.c1 = (coin.rank>0 && coin.rank<=2500);
+  // C2: daily volume < 10% of market cap
+  met.c2 = (coin.mc>0 && coin.vol>0 && coin.vol/coin.mc < 0.10);
+  // C3: circulating supply is 20–60% of total supply
+  const circPct = coin.totalSupply>0 ? coin.circSupply/coin.totalSupply : null;
+  met.c3 = (circPct!==null && circPct>=0.20 && circPct<=0.60);
+  // C6: FDV is 3x+ market cap
+  met.c6 = (coin.fdv>0 && coin.mc>0 && coin.fdv/coin.mc >= 3);
+  return met;
+}
+
+function totalScore(coin, manualChecks){
+  const auto=autoScore(coin);
+  let count=0;
+  if(auto.c1) count++;
+  if(auto.c2) count++;
+  if(auto.c3) count++;
+  if(auto.c6) count++;
+  const checks=manualChecks[coin.id]||{};
+  if(checks.c4) count++;
+  if(checks.c5) count++;
+  if(checks.c7) count++;
+  return count;
+}
+
+function scoreLabel(n,dark){
+  if(n>=5) return{label:"Strong OTC",bg:dark?"#052e16":"#dcfce7",text:dark?"#4ade80":"#166534",dot:"#22c55e"};
+  if(n>=3) return{label:"Good OTC",  bg:dark?"#1c1400":"#fef9c3",text:dark?"#fbbf24":"#854d0e",dot:"#f59e0b"};
+  if(n>=1) return{label:"Possible",  bg:dark?"#1a1a35":"#f3f4f6",text:dark?"#7070cc":"#6366f1",dot:"#6366f1"};
+  return          {label:"Weak",     bg:dark?"#1a1a1a":"#f9f9f9",text:dark?"#555":"#9ca3af",   dot:"#d1d5db"};
+}
+
+// ── API fetchers ───────────────────────────────────────────────────
+async function fetchCGSector(sector){
   const results=[];
-  for(const page of[1,2]){
+  for(const page of[1,2,3]){
     try{
       const qs=new URLSearchParams({
-        vs_currency:"usd",category:cat.cgId,
-        order:"market_cap_asc",per_page:"250",page:String(page),
-        sparkline:"false",price_change_percentage:"24h",
+        vs_currency:"usd", category:sector.cgId,
+        order:"market_cap_desc", per_page:"250", page:String(page),
+        sparkline:"false", price_change_percentage:"24h",
       }).toString();
       const res=await fetch(`/api/coingecko?${qs}`);
       if(!res.ok) break;
       const data=await res.json();
       if(!Array.isArray(data)||data.length===0) break;
-      const batch=data
-        .filter(c=>qualifies(c.market_cap,c.total_volume||0))
-        .map(c=>({
-          id:"cg_"+c.id,rawId:c.id,
-          name:c.name,symbol:(c.symbol||"").toUpperCase(),
-          image:c.image,mc:c.market_cap,price:c.current_price,
-          vol:c.total_volume,change24h:c.price_change_percentage_24h,
-          cat:cat.id,source:"CoinGecko",isNew:false,
-        }));
-      results.push(...batch);
-      await new Promise(r=>setTimeout(r,1000));
+      data.forEach(c=>{
+        results.push({
+          id:"cg_"+c.id, rawId:c.id,
+          name:c.name, symbol:(c.symbol||"").toUpperCase(),
+          image:c.image,
+          mc:c.market_cap||0,
+          price:c.current_price||0,
+          vol:c.total_volume||0,
+          change24h:c.price_change_percentage_24h||0,
+          rank:c.market_cap_rank||9999,
+          circSupply:c.circulating_supply||0,
+          totalSupply:c.total_supply||0,
+          fdv:c.fully_diluted_valuation||0,
+          sector:sector.id,
+          source:"CoinGecko",
+          isNew:false,
+        });
+      });
+      await new Promise(r=>setTimeout(r,900));
     }catch(e){ break; }
   }
   return results;
@@ -112,51 +190,66 @@ async function fetchCGCat(cat){
 async function fetchCMC(){
   const results=[];
   const now=Date.now();
-  for(const start of[1,201,401]){
+  for(const start of[1,201,401,601,801]){
     try{
       const qs=new URLSearchParams({
-        limit:"200",start:String(start),convert:"USD",
-        sort:"market_cap",sort_dir:"asc",
+        limit:"200", start:String(start), convert:"USD",
+        sort:"market_cap", sort_dir:"desc",
       }).toString();
       const res=await fetch(`/api/cmc?${qs}`);
       if(!res.ok) break;
       const data=await res.json();
-      const batch=(data.data||[])
-        .filter(c=>{
-          const mc=c.quote?.USD?.market_cap||0,vol=c.quote?.USD?.volume_24h||0;
-          return qualifies(mc,vol);
-        })
-        .map(c=>{
-          const q=c.quote?.USD||{};
-          const ageDays=(now-new Date(c.date_added).getTime())/86400000;
-          return{
-            id:"cmc_"+c.id,rawId:String(c.id),
-            name:c.name,symbol:c.symbol,
-            image:`https://s2.coinmarketcap.com/static/img/coins/64x64/${c.id}.png`,
-            mc:q.market_cap||0,price:q.price||0,vol:q.volume_24h||0,
-            change24h:q.percent_change_24h||0,
-            cat:guessCat(c.tags||[]),source:"CMC",isNew:ageDays<=30,
-          };
+      if(!(data.data?.length)) break;
+      data.data.forEach(c=>{
+        const q=c.quote?.USD||{};
+        const ageDays=(now-new Date(c.date_added).getTime())/86400000;
+        results.push({
+          id:"cmc_"+c.id, rawId:String(c.id),
+          name:c.name, symbol:c.symbol,
+          image:`https://s2.coinmarketcap.com/static/img/coins/64x64/${c.id}.png`,
+          mc:q.market_cap||0,
+          price:q.price||0,
+          vol:q.volume_24h||0,
+          change24h:q.percent_change_24h||0,
+          rank:c.cmc_rank||9999,
+          circSupply:c.circulating_supply||0,
+          totalSupply:c.total_supply||0,
+          fdv:q.fully_diluted_market_cap||0,
+          sector:guessSector(c.tags||[]),
+          source:"CMC",
+          isNew:ageDays<=30,
         });
-      results.push(...batch);
+      });
       await new Promise(r=>setTimeout(r,600));
     }catch(e){ break; }
   }
   return results;
 }
 
-function guessCat(tags){
+function guessSector(tags){
   const t=tags.map(x=>x.toLowerCase()).join(" ");
-  if(t.includes("defi")||t.includes("dex")||t.includes("lending"))return"defi";
-  if(t.includes("ai")||t.includes("artificial"))return"ai";
-  if(t.includes("meme")||t.includes("dog")||t.includes("cat"))return"meme";
-  if(t.includes("layer")||t.includes("infra")||t.includes("oracle"))return"infra";
+  if(t.includes("real-world-asset")||t.includes("rwa")||t.includes("tokenized")) return"rwa";
+  if(t.includes("defi")||t.includes("dex")||t.includes("lending")) return"defi";
+  if(t.includes("ai")||t.includes("artificial-intelligence")) return"ai";
+  if(t.includes("meme")) return"meme";
+  if(t.includes("layer")||t.includes("infrastructure")||t.includes("oracle")) return"infra";
   return"other";
 }
 
-function exportCSV(coins){
-  const h=["Name","Symbol","Category","Source","Market Cap","Price","24h %","Volume","OTC Score","New?"];
-  const r=coins.map(c=>[`"${c.name}"`,c.symbol,catInfo(c.cat).label,c.source,c.mc.toFixed(0),c.price,(c.change24h||0).toFixed(2),c.vol.toFixed(0),otcScore(c.mc,c.vol),c.isNew?"YES":""].join(","));
+function exportCSV(coins, manualChecks){
+  const h=["Name","Symbol","Sector","Source","Rank","Market Cap","Price","24h %","Volume","Circ Supply","Total Supply","FDV","OTC Score","C1","C2","C3","C4","C5","C6","C7"];
+  const r=coins.map(c=>{
+    const auto=autoScore(c);
+    const mc=manualChecks[c.id]||{};
+    return[
+      `"${c.name}"`,c.symbol,sectorInfo(c.sector).label,c.source,c.rank,
+      c.mc.toFixed(0),c.price,(c.change24h||0).toFixed(2),c.vol.toFixed(0),
+      c.circSupply.toFixed(0),c.totalSupply.toFixed(0),c.fdv.toFixed(0),
+      totalScore(c,manualChecks),
+      auto.c1?"✓":"",auto.c2?"✓":"",auto.c3?"✓":"",
+      mc.c4?"✓":"",mc.c5?"✓":"",auto.c6?"✓":"",mc.c7?"✓":"",
+    ].join(",");
+  });
   const blob=new Blob([[h.join(","),...r].join("\n")],{type:"text/csv"});
   Object.assign(document.createElement("a"),{href:URL.createObjectURL(blob),download:"otc-scan.csv"}).click();
 }
@@ -165,64 +258,139 @@ function Spinner(){
   return<svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{animation:"spin 0.8s linear infinite",flexShrink:0}}><circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#fff" strokeWidth="3" strokeLinecap="round"/></svg>;
 }
 
-// ── Modal ──────────────────────────────────────────────────────────
-function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
+// ── Project Modal ──────────────────────────────────────────────────
+function ProjectModal({coin,dark,onClose,isWatched,onToggleWatch,manualChecks,onToggleManual}){
   const theme=Th(dark);
-  const sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark);
-  const cat=catInfo(coin.cat),chg=coin.change24h||0;
-  const vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
-  const url=projectURL(coin),isCMC=coin.source==="CMC";
+  const auto=autoScore(coin);
+  const mc=manualChecks[coin.id]||{};
+  const score=totalScore(coin,manualChecks);
+  const sl=scoreLabel(score,dark);
+  const sec=sectorInfo(coin.sector);
+  const url=projectURL(coin);
+  const isCMC=coin.source==="CMC";
+  const circPct=coin.totalSupply>0?(coin.circSupply/coin.totalSupply*100).toFixed(1)+"%" : "—";
+  const fdvRatio=coin.mc>0&&coin.fdv>0?(coin.fdv/coin.mc).toFixed(1)+"x":"—";
+
+  const criteriaStatus={
+    c1:auto.c1, c2:auto.c2, c3:auto.c3,
+    c4:!!mc.c4, c5:!!mc.c5, c6:auto.c6, c7:!!mc.c7,
+  };
+
   return(
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:theme.overlay,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:theme.modalBg,border:`1px solid ${theme.border}`,borderRadius:16,width:"100%",maxWidth:420,boxShadow:"0 25px 60px rgba(0,0,0,0.3)",animation:"modalIn 0.2s cubic-bezier(0.34,1.56,0.64,1)",overflow:"hidden"}}>
-        <div style={{background:`linear-gradient(135deg,${cat.color}22,${cat.color}08)`,borderBottom:`1px solid ${theme.border}`,padding:"20px 20px 16px",display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
-          <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <img src={coin.image} alt={coin.name} width={52} height={52} style={{borderRadius:"50%",border:`2px solid ${cat.color}40`,flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:theme.overlay,zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px",overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:theme.modalBg,border:`1px solid ${theme.border}`,borderRadius:16,width:"100%",maxWidth:500,boxShadow:"0 25px 60px rgba(0,0,0,0.4)",animation:"modalIn 0.2s cubic-bezier(0.34,1.56,0.64,1)",overflow:"hidden",margin:"auto"}}>
+
+        {/* Header */}
+        <div style={{background:`linear-gradient(135deg,${sec.color}20,${sec.color}06)`,borderBottom:`1px solid ${theme.border}`,padding:"18px 20px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <img src={coin.image} alt={coin.name} width={48} height={48} style={{borderRadius:"50%",border:`2px solid ${sec.color}40`,flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
             <div>
-              <div style={{fontSize:18,fontWeight:700,color:theme.text,display:"flex",alignItems:"center",gap:7}}>
+              <div style={{fontSize:17,fontWeight:700,color:theme.text,display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                 {coin.name}
-                {coin.isNew&&<span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:dark?"#1a0808":"#fff5f5",color:"#ef4444",border:"1px solid #ef444430",animation:"pulse 2s infinite"}}>NEW</span>}
+                {coin.isNew&&<span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:dark?"#1a0808":"#fff5f5",color:"#ef4444",border:"1px solid #ef444430"}}>NEW</span>}
               </div>
-              <div style={{fontSize:13,color:theme.textDim,marginTop:3,display:"flex",alignItems:"center",gap:6}}>
-                <span>{coin.symbol}</span>
-                <span style={{width:3,height:3,borderRadius:"50%",background:theme.textDim}}/>
-                <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:isCMC?(dark?"#1a0a30":"#f5f3ff"):(dark?"#0a1a2e":"#eff6ff"),color:isCMC?"#8b5cf6":"#3b82f6",border:`1px solid ${isCMC?"#8b5cf630":"#3b82f630"}`}}>
-                  {isCMC?"CoinMarketCap":"CoinGecko"}
+              <div style={{fontSize:12,color:theme.textDim,marginTop:3,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{fontWeight:600}}>{coin.symbol}</span>
+                <span>·</span>
+                <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                  <span style={{width:6,height:6,borderRadius:"50%",background:sec.color}}/>
+                  {sec.label}
                 </span>
+                <span>·</span>
+                <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,background:isCMC?(dark?"#1a0a30":"#f5f3ff"):(dark?"#0a1a2e":"#eff6ff"),color:isCMC?"#8b5cf6":"#3b82f6"}}>
+                  {isCMC?"CMC":"CoinGecko"}
+                </span>
+                <span>· Rank #{coin.rank}</span>
               </div>
             </div>
           </div>
-          <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:theme.textDim,padding:4,borderRadius:6}}>
+          <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:theme.textDim,padding:4,flexShrink:0}}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
           </button>
         </div>
-        <div style={{padding:"14px 20px",borderBottom:`1px solid ${theme.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{fontSize:11,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em"}}>OTC Score</div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
+
+        {/* OTC Score bar */}
+        <div style={{padding:"14px 20px",borderBottom:`1px solid ${theme.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:5}}>OTC Prospect Score</div>
             <div style={{display:"flex",gap:4}}>
-              {[1,2,3,4,5,6].map(i=><div key={i} style={{width:22,height:6,borderRadius:3,background:i<=sc?si.dot:theme.border}}/>)}
+              {[1,2,3,4,5,6,7].map(i=>(
+                <div key={i} style={{width:24,height:7,borderRadius:4,background:i<=score?sl.dot:theme.border,transition:"background 0.2s"}}/>
+              ))}
             </div>
-            <span style={{display:"inline-flex",alignItems:"center",gap:5,background:si.bg,color:si.text,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
-              <span style={{width:6,height:6,borderRadius:"50%",background:si.dot}}/>{si.label} {sc}/6
-            </span>
           </div>
+          <span style={{display:"inline-flex",alignItems:"center",gap:6,background:sl.bg,color:sl.text,borderRadius:20,padding:"5px 12px",fontSize:12,fontWeight:700,flexShrink:0}}>
+            <span style={{width:7,height:7,borderRadius:"50%",background:sl.dot}}/>{sl.label} ({score}/7)
+          </span>
         </div>
-        <div style={{padding:"16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+
+        {/* Market data */}
+        <div style={{padding:"14px 20px",borderBottom:`1px solid ${theme.border}`,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
           {[
-            {label:"Market Cap",value:fmtUSD(coin.mc)},
-            {label:"Price",value:fmtPrice(coin.price)},
-            {label:"24h Change",value:(chg>=0?"+":"")+chg.toFixed(2)+"%",color:chg>=0?"#22c55e":"#ef4444"},
+            {label:"Market Cap",  value:fmtUSD(coin.mc)},
+            {label:"Price",       value:fmtPrice(coin.price)},
+            {label:"24h Change",  value:(coin.change24h>=0?"+":"")+coin.change24h.toFixed(1)+"%", color:coin.change24h>=0?theme.green:theme.red},
             {label:"Volume (24h)",value:fmtUSD(coin.vol)},
-            {label:"Vol / MC",value:vr!=="—"?vr+"%":"—"},
-            {label:"Category",value:cat.label,color:cat.color},
+            {label:"FDV",         value:fmtUSD(coin.fdv)},
+            {label:"FDV / MC",    value:fdvRatio},
+            {label:"Circ Supply", value:fmtUSD(coin.circSupply)},
+            {label:"Total Supply",value:fmtUSD(coin.totalSupply)},
+            {label:"Circ %",      value:circPct},
           ].map(row=>(
-            <div key={row.label} style={{background:theme.statBg,borderRadius:9,padding:"12px 14px",border:`1px solid ${theme.border}`}}>
-              <div style={{fontSize:10,color:theme.textDim,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:5}}>{row.label}</div>
-              <div style={{fontSize:15,fontWeight:700,color:row.color||theme.text}}>{row.value}</div>
+            <div key={row.label} style={{background:theme.statBg,borderRadius:8,padding:"10px 12px",border:`1px solid ${theme.border}`}}>
+              <div style={{fontSize:9,color:theme.textDim,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{row.label}</div>
+              <div style={{fontSize:13,fontWeight:700,color:row.color||theme.text}}>{row.value}</div>
             </div>
           ))}
         </div>
-        <div style={{padding:"0 20px 20px",display:"flex",gap:8,flexDirection:"column"}}>
+
+        {/* 7 Criteria */}
+        <div style={{padding:"14px 20px",borderBottom:`1px solid ${theme.border}`}}>
+          <div style={{fontSize:11,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>OTC Criteria Checklist</div>
+          {CRITERIA.map(cr=>{
+            const met=criteriaStatus[cr.id];
+            const isManual=!cr.auto;
+            return(
+              <div key={cr.id}
+                onClick={isManual?()=>onToggleManual(coin.id,cr.id):undefined}
+                style={{
+                  display:"flex",alignItems:"flex-start",gap:10,
+                  padding:"8px 10px",borderRadius:8,marginBottom:4,
+                  background:met?(dark?"#0a1a0a":"#f0fdf4"):theme.statBg,
+                  border:`1px solid ${met?(dark?"#14532d40":"#bbf7d040"):theme.border}`,
+                  cursor:isManual?"pointer":"default",
+                  transition:"all 0.15s",
+                }}>
+                {/* checkbox / auto indicator */}
+                <div style={{
+                  width:18,height:18,borderRadius:isManual?4:9,
+                  border:`1.5px solid ${met?"#22c55e":theme.borderMid}`,
+                  background:met?"#22c55e":theme.bg,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  flexShrink:0,marginTop:1,transition:"all 0.15s",
+                }}>
+                  {met&&<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,fontWeight:600,color:met?theme.green:theme.textMid,display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:10,color:theme.textDim}}>#{cr.num}</span>
+                    {cr.title}
+                    {isManual&&<span style={{fontSize:9,color:theme.textDim,fontWeight:400,marginLeft:"auto"}}>tap to check</span>}
+                  </div>
+                  <div style={{fontSize:11,color:theme.textDim,marginTop:2,lineHeight:1.4}}>{cr.desc}</div>
+                </div>
+              </div>
+            );
+          })}
+          {MANUAL_CRITERIA.length>0&&(
+            <div style={{fontSize:10,color:theme.textDim,marginTop:8,padding:"6px 8px",background:theme.statBg,borderRadius:6,border:`1px solid ${theme.border}`}}>
+              💡 Criteria #4, #5, #7 require manual research — tap to check once verified.
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{padding:"14px 20px",display:"flex",gap:8,flexDirection:"column"}}>
           <a href={url} target="_blank" rel="noopener noreferrer"
             style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"11px 16px",borderRadius:9,background:isCMC?"linear-gradient(135deg,#3b48ff,#6366f1)":"linear-gradient(135deg,#2ec97b,#10b981)",color:"#fff",fontSize:13,fontWeight:700,textDecoration:"none"}}
             onMouseEnter={e=>e.currentTarget.style.opacity="0.88"}
@@ -240,22 +408,22 @@ function ProjectModal({coin,dark,onClose,onToggleWatch,isWatched}){
   );
 }
 
-// ── main ───────────────────────────────────────────────────────────
+// ── main app ───────────────────────────────────────────────────────
 export default function App(){
-  const [dark,      setDark]     =useState(()=>lsGet("otc_dark",false));
-  const [sideOpen,  setSideOpen] =useState(false);
-  const [allCoins,  setAllCoins] =useState(()=>lsGet("otc_coins",[]));
-  const [errors,    setErrors]   =useState(()=>lsGet("otc_errors",[]));
-  const [lastScan,  setLastScan] =useState(()=>{ const v=lsGet("otc_lastscan",null); return v?new Date(v):null; });
-  const [newAlerts, setNewAlerts]=useState(()=>lsGet("otc_alerts",[]));
-  const [scanning,  setScanning] =useState(false);
-  const [progress,  setProgress] =useState("");
-  const [activeTab, setActiveTab]=useState("all");
-  const [sortBy,    setSortBy]   =useState("otc");
-  const [page,      setPage]     =useState(0);
-  const [modalCoin, setModalCoin]=useState(null);
+  const [dark,      setDark]      =useState(()=>lsGet("otc_dark",false));
+  const [sideOpen,  setSideOpen]  =useState(false);
+  const [allCoins,  setAllCoins]  =useState(()=>lsGet("otc_coins",[]));
+  const [errors,    setErrors]    =useState(()=>lsGet("otc_errors",[]));
+  const [lastScan,  setLastScan]  =useState(()=>{ const v=lsGet("otc_lastscan",null); return v?new Date(v):null; });
+  const [scanning,  setScanning]  =useState(false);
+  const [progress,  setProgress]  =useState("");
+  const [activeTab, setActiveTab] =useState("all");
+  const [sortBy,    setSortBy]    =useState("score");
+  const [page,      setPage]      =useState(0);
+  const [modalCoin, setModalCoin] =useState(null);
+  const [filterMin, setFilterMin] =useState(0); // min OTC score filter
 
-  // Watchlist stores full coin objects — always persists
+  // Watchlist — full coin objects, always persists
   const [watchMap,setWatchMapRaw]=useState(()=>new Map(lsGet("otc_watchmap",[])));
   const setWatchMap=fn=>{
     setWatchMapRaw(prev=>{
@@ -270,46 +438,60 @@ export default function App(){
     return next;
   });
 
-  const persist=(coins,errs,alerts,ts)=>{
-    setAllCoins(coins);   lsSet("otc_coins",coins);
-    setErrors(errs);      lsSet("otc_errors",errs);
-    setNewAlerts(alerts); lsSet("otc_alerts",alerts);
-    setLastScan(ts);      lsSet("otc_lastscan",ts?.toISOString()||null);
+  // Manual criteria checks per coin — persists
+  const [manualChecks,setManualChecksRaw]=useState(()=>lsGet("otc_manual",{}));
+  const setManualChecks=fn=>{
+    setManualChecksRaw(prev=>{
+      const next=typeof fn==="function"?fn(prev):fn;
+      lsSet("otc_manual",next);
+      return next;
+    });
+  };
+  const toggleManual=(coinId,criteriaId)=>{
+    setManualChecks(prev=>{
+      const coinChecks={...(prev[coinId]||{})};
+      coinChecks[criteriaId]=!coinChecks[criteriaId];
+      return{...prev,[coinId]:coinChecks};
+    });
+    // Also update modal coin score live
+    if(modalCoin?.id===coinId) setModalCoin(mc=>mc?{...mc}:mc);
   };
 
-  // ── simple scan: fetch each CG category + CMC, merge, dedup ──────
+  const persist=(coins,errs,ts)=>{
+    setAllCoins(coins); lsSet("otc_coins",coins);
+    setErrors(errs);    lsSet("otc_errors",errs);
+    setLastScan(ts);    lsSet("otc_lastscan",ts?.toISOString()||null);
+  };
+
   const scan=useCallback(async()=>{
     if(scanning) return;
     setScanning(true);
     setAllCoins([]); lsSet("otc_coins",[]);
-    setErrors([]); setNewAlerts([]); setPage(0);
+    setErrors([]); setPage(0);
 
     const fetched=[], errs=[];
 
-    // CoinGecko — one category at a time
-    for(let i=0;i<CG_CATS.length;i++){
-      const cat=CG_CATS[i];
-      setProgress(`CoinGecko: ${cat.label} (${i+1}/${CG_CATS.length})`);
-      try{ fetched.push(...await fetchCGCat(cat)); }
-      catch(e){ errs.push(`CG/${cat.label}: ${e.message}`); }
-      if(i<CG_CATS.length-1) await new Promise(r=>setTimeout(r,1200));
+    // CoinGecko — each sector
+    for(let i=0;i<SECTORS.length;i++){
+      const sec=SECTORS[i];
+      setProgress(`CoinGecko: ${sec.label} (${i+1}/${SECTORS.length})`);
+      try{ fetched.push(...await fetchCGSector(sec)); }
+      catch(e){ errs.push(`CG/${sec.label}: ${e.message}`); }
+      if(i<SECTORS.length-1) await new Promise(r=>setTimeout(r,1200));
     }
 
-    // CoinMarketCap
-    setProgress("CMC: fetching…");
+    // CMC
+    setProgress("CMC: fetching top 1000…");
     const cgSymbols=new Set(fetched.map(c=>c.symbol));
     try{
       const cmcCoins=await fetchCMC();
-      const newOnes=[];
       for(const c of cmcCoins){
-        if(cgSymbols.has(c.symbol)) continue; // dedup: CMC wins on overlap
+        if(cgSymbols.has(c.symbol)) continue;
         fetched.push(c);
-        if(c.isNew) newOnes.push(c);
       }
-      if(newOnes.length) persist([],errs,newOnes.slice(0,10),null);
     }catch(e){ errs.push(`CMC: ${e.message}`); }
 
-    // Final dedup by rawId
+    // Dedup by rawId
     const seen=new Set();
     const final=fetched.filter(c=>{
       if(seen.has(c.rawId)) return false;
@@ -317,49 +499,54 @@ export default function App(){
       return true;
     });
 
-    // Collect new alerts from CG too
-    const allNew=final.filter(c=>c.isNew);
-
-    persist(final, errs, allNew.slice(0,10), new Date());
+    persist(final, errs, new Date());
     setScanning(false);
     setProgress("");
   },[scanning]);
 
   const clearScan=()=>{
     setAllCoins([]); lsSet("otc_coins",[]);
-    setErrors([]); lsSet("otc_errors",[]);
-    setNewAlerts([]); lsSet("otc_alerts",[]);
+    setErrors([]);   lsSet("otc_errors",[]);
     setLastScan(null); lsSet("otc_lastscan",null);
     setPage(0);
   };
   const clearWatchlist=()=>setWatchMap(new Map());
   const watchCoins=[...watchMap.values()];
 
-  const tabs=[
-    {id:"all",   label:"All projects",   count:allCoins.length},
-    {id:"defi",  label:"DeFi",           count:allCoins.filter(c=>c.cat==="defi").length,  color:"#6366f1"},
-    {id:"ai",    label:"AI + Crypto",    count:allCoins.filter(c=>c.cat==="ai").length,    color:"#10b981"},
-    {id:"meme",  label:"Memes",          count:allCoins.filter(c=>c.cat==="meme").length,  color:"#f59e0b"},
-    {id:"infra", label:"Infrastructure", count:allCoins.filter(c=>c.cat==="infra").length, color:"#8b5cf6"},
-    {id:"new",   label:"New Listings",   count:allCoins.filter(c=>c.isNew).length,         color:"#ef4444"},
-    {id:"watch", label:"Watchlist",      count:watchCoins.length},
+  const SORT_OPTIONS=[
+    {value:"score",   label:"OTC Score"},
+    {value:"rank",    label:"Rank"},
+    {value:"mc_desc", label:"Market Cap ↓"},
+    {value:"mc_asc",  label:"Market Cap ↑"},
+    {value:"vol",     label:"Volume ↓"},
+    {value:"fdv",     label:"FDV ↓"},
+    {value:"change",  label:"24h Change"},
   ];
 
-  const filtered=(()=>{
-    let list=
-      activeTab==="watch"?watchCoins:
-      activeTab==="new"?allCoins.filter(c=>c.isNew):
-      activeTab==="all"?allCoins:
-      allCoins.filter(c=>c.cat===activeTab);
-    return[...list].sort((a,b)=>{
-      if(sortBy==="otc")    return otcScore(b.mc,b.vol)-otcScore(a.mc,a.vol);
-      if(sortBy==="mc_asc") return a.mc-b.mc;
-      if(sortBy==="mc_desc")return b.mc-a.mc;
-      if(sortBy==="vol")    return b.vol-a.vol;
-      if(sortBy==="change") return(b.change24h||0)-(a.change24h||0);
+  const tabs=[
+    {id:"all",   label:"All",           count:allCoins.length},
+    {id:"defi",  label:"DeFi",          count:allCoins.filter(c=>c.sector==="defi").length,  color:"#6366f1"},
+    {id:"ai",    label:"AI + Crypto",   count:allCoins.filter(c=>c.sector==="ai").length,    color:"#10b981"},
+    {id:"meme",  label:"Memes",         count:allCoins.filter(c=>c.sector==="meme").length,  color:"#f59e0b"},
+    {id:"infra", label:"Infrastructure",count:allCoins.filter(c=>c.sector==="infra").length, color:"#8b5cf6"},
+    {id:"rwa",   label:"RWA",           count:allCoins.filter(c=>c.sector==="rwa").length,   color:"#06b6d4"},
+    {id:"watch", label:"Watchlist",     count:watchCoins.length},
+  ];
+
+  const baseList=activeTab==="watch"?watchCoins:activeTab==="all"?allCoins:allCoins.filter(c=>c.sector===activeTab);
+
+  const filtered=[...baseList]
+    .filter(c=>totalScore(c,manualChecks)>=filterMin)
+    .sort((a,b)=>{
+      if(sortBy==="score")   return totalScore(b,manualChecks)-totalScore(a,manualChecks);
+      if(sortBy==="rank")    return (a.rank||9999)-(b.rank||9999);
+      if(sortBy==="mc_desc") return b.mc-a.mc;
+      if(sortBy==="mc_asc")  return a.mc-b.mc;
+      if(sortBy==="vol")     return b.vol-a.vol;
+      if(sortBy==="fdv")     return b.fdv-a.fdv;
+      if(sortBy==="change")  return (b.change24h||0)-(a.change24h||0);
       return 0;
     });
-  })();
 
   const PAGE_SIZE=10;
   const pageStart=page*PAGE_SIZE;
@@ -368,6 +555,10 @@ export default function App(){
   const selectTab=id=>{setActiveTab(id);setPage(0);setSideOpen(false);};
   const theme=Th(dark);
 
+  const strongCount=allCoins.filter(c=>totalScore(c,manualChecks)>=3).length;
+  const newCount=allCoins.filter(c=>c.isNew).length;
+
+  // ── sidebar ───────────────────────────────────────────────────────
   const SidebarInner=()=>(
     <>
       <div style={{padding:"20px 18px 14px",display:"flex",alignItems:"center",gap:10}}>
@@ -379,14 +570,15 @@ export default function App(){
           <div style={{fontSize:11,color:theme.textDim,marginTop:1}}>Web3 Deal Flow</div>
         </div>
       </div>
+
       <div style={{padding:"0 10px",flex:1}}>
-        <div style={{fontSize:10,fontWeight:700,color:theme.textDim,letterSpacing:"0.1em",textTransform:"uppercase",padding:"6px 8px 8px"}}>Categories</div>
+        <div style={{fontSize:10,fontWeight:700,color:theme.textDim,letterSpacing:"0.1em",textTransform:"uppercase",padding:"6px 8px 8px"}}>Sectors</div>
         {tabs.map(t=>{
           const active=activeTab===t.id;
           return(
             <button key={t.id} onClick={()=>selectTab(t.id)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 10px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",background:active?theme.navAct:"transparent",color:active?theme.navActTxt:theme.textMid,fontSize:14,fontWeight:active?600:400,marginBottom:2,transition:"all 0.12s",textAlign:"left"}}>
               <span style={{display:"flex",alignItems:"center",gap:8}}>
-                {t.color&&<span style={{width:7,height:7,borderRadius:"50%",background:active?t.color:theme.borderMid,flexShrink:0}}/>}
+                {t.color&&<span style={{width:7,height:7,borderRadius:"50%",background:active?t.color:theme.borderMid,flexShrink:0,transition:"background 0.12s"}}/>}
                 {t.label}
               </span>
               {t.count>0&&<span style={{background:active?theme.accent:theme.border,color:active?"#fff":theme.textDim,fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,minWidth:22,textAlign:"center"}}>{t.count}</span>}
@@ -394,63 +586,86 @@ export default function App(){
           );
         })}
       </div>
+
       <div style={{borderTop:`1px solid ${theme.border}`,padding:"14px 18px",marginTop:8}}>
-        <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10}}>Active Filters</div>
-        {[["Market cap","$1M – $50M"],["Volume (24h)","$400K – $7M"]].map(([k,v])=>(
-          <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
-            <span style={{fontSize:12,color:theme.textDim}}>{k}</span>
-            <span style={{fontSize:12,fontWeight:600,color:theme.textMid}}>{v}</span>
+        <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10}}>OTC Criteria</div>
+        {CRITERIA.map(cr=>(
+          <div key={cr.id} style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}>
+            <span style={{fontSize:9,fontWeight:700,color:theme.textDim,minWidth:14}}>#{cr.num}</span>
+            <span style={{fontSize:11,color:theme.textMid}}>{cr.short}</span>
+            {!cr.auto&&<span style={{fontSize:9,color:theme.textDim,marginLeft:"auto"}}>manual</span>}
           </div>
         ))}
+        <div style={{marginTop:10,fontSize:11,color:theme.textDim,lineHeight:1.5,padding:"8px",background:theme.statBg,borderRadius:7,border:`1px solid ${theme.border}`}}>
+          3+ criteria = Strong OTC prospect
+        </div>
       </div>
     </>
   );
 
+  // ── table row ─────────────────────────────────────────────────────
   const renderRow=(coin,i,arr)=>{
-    const chg=coin.change24h||0,vr=coin.mc>0?((coin.vol/coin.mc)*100).toFixed(1):"—";
-    const sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark);
-    const cat=catInfo(coin.cat),isW=watchMap.has(coin.id);
+    const auto=autoScore(coin);
+    const score=totalScore(coin,manualChecks);
+    const sl=scoreLabel(score,dark);
+    const sec=sectorInfo(coin.sector);
+    const isW=watchMap.has(coin.id);
+    const chg=coin.change24h||0;
+    const volPct=coin.mc>0?(coin.vol/coin.mc*100).toFixed(1)+"%" : "—";
     return(
       <tr key={coin.id} onClick={()=>setModalCoin(coin)}
         style={{borderBottom:i<arr.length-1?`1px solid ${theme.border}`:"none",cursor:"pointer",transition:"background 0.1s"}}
         onMouseEnter={e=>e.currentTarget.style.background=theme.bgHov}
         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-        <td style={{padding:"11px 12px"}}>
+        <td style={{padding:"10px 12px"}}>
           <div style={{display:"flex",alignItems:"center",gap:9}}>
-            <img src={coin.image} alt="" width={26} height={26} style={{borderRadius:"50%",flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
+            <img src={coin.image} alt="" width={28} height={28} style={{borderRadius:"50%",flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>
             <div>
               <div style={{fontSize:13,fontWeight:600,color:theme.text,display:"flex",alignItems:"center",gap:5}}>
                 {coin.name}
-                {coin.isNew&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:dark?"#1a0808":"#fff5f5",color:"#ef4444",border:"1px solid #ef444430",animation:"pulse 2s infinite"}}>NEW</span>}
+                {coin.isNew&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:dark?"#1a0808":"#fff5f5",color:"#ef4444",border:"1px solid #ef444430"}}>NEW</span>}
               </div>
-              <div style={{fontSize:10,color:theme.textDim,marginTop:1}}>{coin.symbol}</div>
+              <div style={{fontSize:10,color:theme.textDim,marginTop:1}}>{coin.symbol} · #{coin.rank}</div>
             </div>
           </div>
         </td>
-        <td style={{padding:"11px 12px"}}>
-          <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:coin.source==="CMC"?(dark?"#1a0a30":"#f5f3ff"):(dark?"#0a1a2e":"#eff6ff"),color:coin.source==="CMC"?"#8b5cf6":"#3b82f6",border:`1px solid ${coin.source==="CMC"?"#8b5cf630":"#3b82f630"}`}}>
+        <td style={{padding:"10px 12px"}}>
+          <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:coin.source==="CMC"?(dark?"#1a0a30":"#f5f3ff"):(dark?"#0a1a2e":"#eff6ff"),color:coin.source==="CMC"?"#8b5cf6":"#3b82f6"}}>
             {coin.source==="CMC"?"CMC":"CG"}
           </span>
         </td>
-        <td style={{padding:"11px 12px",fontSize:13,fontWeight:500,color:theme.text}}>{fmtUSD(coin.mc)}</td>
-        <td style={{padding:"11px 12px",fontSize:13,color:theme.textMid}}>{fmtPrice(coin.price)}</td>
-        <td style={{padding:"11px 12px",fontSize:13,fontWeight:700,color:chg>=0?"#22c55e":"#ef4444"}}>{(chg>=0?"+":"")+chg.toFixed(1)+"%"}</td>
-        <td style={{padding:"11px 12px",fontSize:13,color:theme.textMid}}>{fmtUSD(coin.vol)}</td>
-        <td style={{padding:"11px 12px",fontSize:12,color:theme.textDim}}>{vr!=="—"?vr+"%":"—"}</td>
-        <td style={{padding:"11px 12px"}}>
-          <span style={{display:"inline-flex",alignItems:"center",gap:5,background:cat.color+"18",color:cat.color,border:`1px solid ${cat.color}30`,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700}}>
-            <span style={{width:5,height:5,borderRadius:"50%",background:cat.color,flexShrink:0}}/>{cat.label}
+        <td style={{padding:"10px 12px",fontSize:13,color:theme.text,fontWeight:500}}>{fmtUSD(coin.mc)}</td>
+        <td style={{padding:"10px 12px",fontSize:13,color:theme.textMid}}>{fmtUSD(coin.vol)}</td>
+        <td style={{padding:"10px 12px",fontSize:12,color:theme.textDim}}>{volPct}</td>
+        <td style={{padding:"10px 12px",fontSize:13,color:theme.textMid}}>{fmtUSD(coin.fdv)}</td>
+        <td style={{padding:"10px 12px",fontSize:12,color:theme.textDim}}>
+          {coin.totalSupply>0?pct(coin.circSupply,coin.totalSupply):"—"}
+        </td>
+        <td style={{padding:"10px 12px",fontSize:13,fontWeight:700,color:chg>=0?theme.green:theme.red}}>
+          {(chg>=0?"+":"")+chg.toFixed(1)+"%"}
+        </td>
+        <td style={{padding:"10px 12px"}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:4,background:sec.color+"18",color:sec.color,border:`1px solid ${sec.color}30`,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:sec.color}}/>{sec.label}
           </span>
         </td>
-        <td style={{padding:"11px 12px"}}>
-          <span style={{display:"inline-flex",alignItems:"center",gap:5,background:si.bg,color:si.text,borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:700}}>
-            <span style={{width:6,height:6,borderRadius:"50%",background:si.dot,flexShrink:0}}/>{si.label} {sc}/6
+        {/* Auto criteria dots */}
+        <td style={{padding:"10px 12px"}}>
+          <div style={{display:"flex",gap:3}}>
+            {[{id:"c1",met:auto.c1},{id:"c2",met:auto.c2},{id:"c3",met:auto.c3},{id:"c6",met:auto.c6}].map(({id,met})=>(
+              <div key={id} title={CRITERIA.find(c=>c.id===id)?.title} style={{width:8,height:8,borderRadius:"50%",background:met?theme.green:theme.border}}/>
+            ))}
+          </div>
+        </td>
+        <td style={{padding:"10px 12px"}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:5,background:sl.bg,color:sl.text,borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>
+            <span style={{width:6,height:6,borderRadius:"50%",background:sl.dot}}/>{sl.label}
           </span>
         </td>
-        <td style={{padding:"11px 12px"}} onClick={e=>e.stopPropagation()}>
+        <td style={{padding:"10px 12px"}} onClick={e=>e.stopPropagation()}>
           <button onClick={e=>{e.stopPropagation();toggleWatch(coin.id,coin);}}
-            style={{padding:"5px 11px",borderRadius:7,border:`1px solid ${isW?theme.accent+"50":theme.border}`,background:isW?theme.accentBg:"transparent",color:isW?theme.accentTxt:theme.textDim,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>
-            {isW?"✓ Saved":"Save"}
+            style={{padding:"4px 10px",borderRadius:7,border:`1px solid ${isW?theme.accent+"50":theme.border}`,background:isW?theme.accentBg:"transparent",color:isW?theme.accentTxt:theme.textDim,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>
+            {isW?"✓":"Save"}
           </button>
         </td>
       </tr>
@@ -464,13 +679,13 @@ export default function App(){
         @keyframes spin    {to{transform:rotate(360deg)}}
         @keyframes pulse   {0%,100%{opacity:1}50%{opacity:.5}}
         @keyframes fadeUp  {from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-        @keyframes modalIn {from{opacity:0;transform:scale(0.92)}to{opacity:1;transform:scale(1)}}
+        @keyframes modalIn {from{opacity:0;transform:scale(0.93)}to{opacity:1;transform:scale(1)}}
         *{box-sizing:border-box;margin:0;padding:0}
         button,select,input{font-family:inherit}
         ::-webkit-scrollbar{width:4px;height:4px}
         ::-webkit-scrollbar-thumb{background:#6366f140;border-radius:4px}
         .d-side{display:flex}
-        .m-side{display:none;position:fixed;top:0;left:0;bottom:0;width:240px;z-index:50;overflow-y:auto;flex-direction:column}
+        .m-side{display:none;position:fixed;top:0;left:0;bottom:0;width:250px;z-index:50;overflow-y:auto;flex-direction:column}
         .m-btn{display:none}
         .desk-tbl{display:block}
         .mob-cards{display:none}
@@ -478,15 +693,26 @@ export default function App(){
         @media(max-width:640px){.desk-tbl{display:none!important}.mob-cards{display:block!important}}
       `}</style>
 
-      {modalCoin&&<ProjectModal coin={modalCoin} dark={dark} onClose={()=>setModalCoin(null)} onToggleWatch={toggleWatch} isWatched={watchMap.has(modalCoin.id)}/>}
+      {modalCoin&&(
+        <ProjectModal
+          coin={modalCoin} dark={dark}
+          onClose={()=>setModalCoin(null)}
+          isWatched={watchMap.has(modalCoin.id)}
+          onToggleWatch={toggleWatch}
+          manualChecks={manualChecks}
+          onToggleManual={toggleManual}
+        />
+      )}
 
-      <aside className="d-side" style={{width:220,background:theme.bgSide,borderRight:`1px solid ${theme.border}`,flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto",transition:"background 0.2s"}}>
+      {/* Desktop sidebar */}
+      <aside className="d-side" style={{width:230,background:theme.bgSide,borderRight:`1px solid ${theme.border}`,flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto",transition:"background 0.2s"}}>
         <SidebarInner/>
       </aside>
 
       {sideOpen&&<div onClick={()=>setSideOpen(false)} style={{position:"fixed",inset:0,background:theme.overlay,zIndex:40}}/>}
 
-      <aside className="m-side" style={{background:theme.bgSide,borderRight:`1px solid ${theme.border}`,boxShadow:"2px 0 20px rgba(0,0,0,0.15)",transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)"}}>
+      {/* Mobile drawer */}
+      <aside className="m-side" style={{background:theme.bgSide,borderRight:`1px solid ${theme.border}`,boxShadow:"2px 0 20px rgba(0,0,0,0.2)",transform:sideOpen?"translateX(0)":"translateX(-100%)",transition:"transform 0.25s cubic-bezier(0.4,0,0.2,1)"}}>
         <div style={{display:"flex",justifyContent:"flex-end",padding:"12px 12px 0"}}>
           <button onClick={()=>setSideOpen(false)} style={{background:"transparent",border:"none",cursor:"pointer",color:theme.textMid,padding:6}}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -495,14 +721,16 @@ export default function App(){
         <SidebarInner/>
       </aside>
 
+      {/* Main */}
       <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
+        {/* Header */}
         <header style={{background:theme.headerBg,borderBottom:`1px solid ${theme.border}`,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,position:"sticky",top:0,zIndex:20,flexWrap:"wrap",transition:"background 0.2s"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <button className="m-btn" onClick={()=>setSideOpen(true)} style={{background:"transparent",border:`1px solid ${theme.border}`,borderRadius:8,padding:"7px 9px",cursor:"pointer",color:theme.textMid,display:"none",alignItems:"center"}}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             </button>
             <div>
-              <h1 style={{fontSize:17,fontWeight:700,color:theme.text,lineHeight:1.2}}>{tabs.find(t=>t.id===activeTab)?.label||"All projects"}</h1>
+              <h1 style={{fontSize:17,fontWeight:700,color:theme.text,lineHeight:1.2}}>{tabs.find(t=>t.id===activeTab)?.label||"All"}</h1>
               <p style={{fontSize:12,color:theme.textDim,marginTop:2}}>{lastScan?`Last scanned ${lastScan.toLocaleTimeString()}`:"Press Scan now to fetch live data"}</p>
             </div>
           </div>
@@ -514,7 +742,7 @@ export default function App(){
               }
             </button>
             {allCoins.length>0&&(
-              <button onClick={()=>exportCSV(filtered)} style={{padding:"7px 13px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1px solid ${theme.border}`,background:theme.bgCard,color:theme.textMid,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
+              <button onClick={()=>exportCSV(filtered,manualChecks)} style={{padding:"7px 13px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1px solid ${theme.border}`,background:theme.bgCard,color:theme.textMid,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 Export CSV
               </button>
@@ -527,30 +755,19 @@ export default function App(){
 
         <div style={{padding:"20px",flex:1}}>
           {errors.length>0&&(
-            <div style={{background:dark?"#1a0808":"#fef2f2",border:`1px solid ${dark?"#7f1d1d50":"#fecaca"}`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:dark?"#fca5a5":"#991b1b"}}>
+            <div style={{background:theme.redBg,border:`1px solid ${theme.red}30`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:theme.redText}}>
               <strong>Notices:</strong> {errors.join(" · ")}
             </div>
           )}
 
-          {newAlerts.length>0&&(
-            <div style={{background:dark?"#1a0808":"#fff5f5",border:"1px solid #ef444430",borderRadius:10,padding:"14px 16px",marginBottom:16,animation:"fadeUp 0.3s ease"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
-                <span style={{width:7,height:7,borderRadius:"50%",background:"#ef4444",animation:"pulse 1.5s infinite",flexShrink:0}}/>
-                {newAlerts.length} NEW LISTING{newAlerts.length>1?"S":""} in this scan (listed in last 30 days)
-              </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                {newAlerts.map(c=><span key={c.id} onClick={()=>setModalCoin(c)} style={{background:dark?"#0a0a14":"#fff",border:"1px solid #ef444430",borderRadius:6,padding:"3px 10px",fontSize:12,color:dark?"#fca5a5":"#dc2626",fontWeight:600,cursor:"pointer"}}>{c.name} <span style={{opacity:.7,fontSize:10}}>{c.symbol}</span></span>)}
-              </div>
-            </div>
-          )}
-
+          {/* Stat cards */}
           {allCoins.length>0&&(
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:20,animation:"fadeUp 0.3s ease"}}>
               {[
-                {label:"Total found",  value:allCoins.length,                                       sub:"after all filters", accent:"#6366f1"},
-                {label:"Strong OTC",   value:allCoins.filter(c=>otcScore(c.mc,c.vol)>=5).length,    sub:"score 5–6 / 6",    accent:"#22c55e"},
-                {label:"New listings", value:allCoins.filter(c=>c.isNew).length,                    sub:"last 30 days",     accent:"#ef4444"},
-                {label:"Watchlist",    value:watchCoins.length,                                      sub:"saved projects",   accent:"#f59e0b"},
+                {label:"Total scanned", value:allCoins.length,   sub:"all sectors",      accent:"#6366f1"},
+                {label:"Strong OTC",    value:strongCount,        sub:"3+ criteria met",  accent:"#22c55e"},
+                {label:"New listings",  value:newCount,           sub:"last 30 days",     accent:"#ef4444"},
+                {label:"Watchlist",     value:watchCoins.length,  sub:"saved projects",   accent:"#f59e0b"},
               ].map(s=>(
                 <div key={s.label} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:"14px 16px",borderTop:`3px solid ${s.accent}`,transition:"background 0.2s"}}>
                   <div style={{fontSize:10,fontWeight:700,color:theme.textDim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>{s.label}</div>
@@ -561,20 +778,30 @@ export default function App(){
             </div>
           )}
 
-          {filtered.length>0&&(
+          {/* Controls bar */}
+          {(filtered.length>0||allCoins.length>0)&&(
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,flexWrap:"wrap"}}>
               {activeTab!=="watch"&&(
                 <>
-                  <span style={{fontSize:12,color:theme.textDim}}>Sort by</span>
+                  <span style={{fontSize:12,color:theme.textDim}}>Sort</span>
                   <select value={sortBy} onChange={e=>{setSortBy(e.target.value);setPage(0);}} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:theme.textMid,cursor:"pointer"}}>
                     {SORT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
+                  <span style={{fontSize:12,color:theme.textDim}}>Min score</span>
+                  <select value={filterMin} onChange={e=>{setFilterMin(Number(e.target.value));setPage(0);}} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:7,padding:"6px 10px",fontSize:12,color:theme.textMid,cursor:"pointer"}}>
+                    <option value={0}>Any</option>
+                    <option value={1}>1+</option>
+                    <option value={2}>2+</option>
+                    <option value={3}>3+ (Strong)</option>
+                    <option value={4}>4+</option>
+                    <option value={5}>5+</option>
+                  </select>
                 </>
               )}
-              <span style={{fontSize:11,color:theme.textDim}}>· Click any row to view</span>
+              <span style={{fontSize:11,color:theme.textDim}}>· Click row for details</span>
               <span style={{marginLeft:"auto",fontSize:12,color:theme.textDim}}>{Math.min(pageStart+1,filtered.length)}–{Math.min(pageStart+PAGE_SIZE,filtered.length)} of {filtered.length}</span>
               {activeTab==="watch"&&watchCoins.length>0&&(
-                <button onClick={clearWatchlist} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #ef444430",background:dark?"#1a0808":"#fff5f5",color:"#ef4444",fontSize:12,cursor:"pointer",fontWeight:600}}>Clear watchlist</button>
+                <button onClick={clearWatchlist} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${theme.red}30`,background:theme.redBg,color:theme.red,fontSize:12,cursor:"pointer",fontWeight:600}}>Clear watchlist</button>
               )}
               {activeTab!=="watch"&&allCoins.length>0&&(
                 <button onClick={clearScan} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textMid,fontSize:12,cursor:"pointer",fontWeight:600}}>Clear scan</button>
@@ -582,14 +809,15 @@ export default function App(){
             </div>
           )}
 
+          {/* Empty state */}
           {!scanning&&allCoins.length===0&&activeTab!=="watch"&&(
             <div style={{textAlign:"center",padding:"80px 20px",animation:"fadeUp 0.3s ease"}}>
               <div style={{width:56,height:56,borderRadius:14,background:theme.accentBg,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke={theme.accent} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </div>
               <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>Ready to scan</div>
-              <div style={{fontSize:13,color:theme.textDim,maxWidth:320,margin:"0 auto",lineHeight:1.7}}>
-                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects from CoinGecko + CMC matching your OTC criteria.
+              <div style={{fontSize:13,color:theme.textDim,maxWidth:360,margin:"0 auto",lineHeight:1.7}}>
+                Click <strong style={{color:theme.accent}}>Scan now</strong> to fetch projects from 5 sectors across CoinGecko + CMC and score them against all 7 OTC criteria.
               </div>
             </div>
           )}
@@ -598,14 +826,15 @@ export default function App(){
             <div style={{textAlign:"center",padding:"60px 0",color:theme.textDim,fontSize:13}}>No saved projects — click any row then Save to Watchlist.</div>
           )}
 
+          {/* Desktop table */}
           {visible.length>0&&(
             <div className="desk-tbl" style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:12,overflow:"hidden",animation:"fadeUp 0.25s ease"}}>
               <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",minWidth:820}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
                   <thead>
                     <tr style={{background:theme.statBg,borderBottom:`1px solid ${theme.border}`}}>
-                      {["Project","Src","Market Cap","Price","24h %","Volume","Vol/MC","Category","OTC Score",""].map(h=>(
-                        <th key={h} style={{padding:"9px 12px",textAlign:"left",fontSize:10,fontWeight:700,color:theme.textDim,letterSpacing:"0.07em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                      {["Project","Src","Market Cap","Volume","Vol/MC","FDV","Circ %","24h %","Sector","Auto (4)","OTC Score",""].map(h=>(
+                        <th key={h} style={{padding:"9px 12px",textAlign:"left",fontSize:10,fontWeight:700,color:theme.textDim,letterSpacing:"0.06em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -622,28 +851,34 @@ export default function App(){
             </div>
           )}
 
+          {/* Mobile cards */}
           {visible.length>0&&(
             <div className="mob-cards">
               {visible.map(coin=>{
-                const chg=coin.change24h||0,sc=otcScore(coin.mc,coin.vol),si=scoreInfo(sc,dark),cat=catInfo(coin.cat),isW=watchMap.has(coin.id);
+                const score=totalScore(coin,manualChecks);
+                const sl=scoreLabel(score,dark);
+                const sec=sectorInfo(coin.sector);
+                const isW=watchMap.has(coin.id);
+                const chg=coin.change24h||0;
+                const auto=autoScore(coin);
                 return(
                   <div key={coin.id} onClick={()=>setModalCoin(coin)} style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:10,padding:14,marginBottom:10,cursor:"pointer",transition:"border-color 0.15s"}}
                     onMouseEnter={e=>e.currentTarget.style.borderColor=theme.accent+"60"}
                     onMouseLeave={e=>e.currentTarget.style.borderColor=theme.border}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
                       <div style={{display:"flex",alignItems:"center",gap:9}}>
-                        <img src={coin.image} alt="" width={30} height={30} style={{borderRadius:"50%"}} onError={e=>{e.target.style.display="none";}}/>
+                        <img src={coin.image} alt="" width={32} height={32} style={{borderRadius:"50%"}} onError={e=>{e.target.style.display="none";}}/>
                         <div>
                           <div style={{fontSize:14,fontWeight:700,color:theme.text}}>{coin.name} {coin.isNew&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:4,background:"#fff5f5",color:"#ef4444",border:"1px solid #ef444430"}}>NEW</span>}</div>
-                          <div style={{fontSize:11,color:theme.textDim}}>{coin.symbol}</div>
+                          <div style={{fontSize:10,color:theme.textDim}}>{coin.symbol} · #{coin.rank}</div>
                         </div>
                       </div>
-                      <span style={{display:"inline-flex",alignItems:"center",gap:4,background:si.bg,color:si.text,borderRadius:20,padding:"3px 9px",fontSize:10,fontWeight:700}}>
-                        <span style={{width:5,height:5,borderRadius:"50%",background:si.dot}}/>{si.label} {sc}/6
+                      <span style={{display:"inline-flex",alignItems:"center",gap:4,background:sl.bg,color:sl.text,borderRadius:20,padding:"3px 9px",fontSize:10,fontWeight:700}}>
+                        <span style={{width:5,height:5,borderRadius:"50%",background:sl.dot}}/>{sl.label}
                       </span>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                      {[["Market Cap",fmtUSD(coin.mc)],["Price",fmtPrice(coin.price)],["24h %",(chg>=0?"+":"")+chg.toFixed(1)+"%",chg>=0?"#22c55e":"#ef4444"],["Volume",fmtUSD(coin.vol)]].map(([k,v,c])=>(
+                      {[["Market Cap",fmtUSD(coin.mc)],["Volume",fmtUSD(coin.vol)],["24h %",(chg>=0?"+":"")+chg.toFixed(1)+"%",chg>=0?theme.green:theme.red],["FDV",fmtUSD(coin.fdv)]].map(([k,v,c])=>(
                         <div key={k} style={{background:theme.statBg,borderRadius:7,padding:"8px 10px"}}>
                           <div style={{fontSize:10,color:theme.textDim,marginBottom:3}}>{k}</div>
                           <div style={{fontSize:13,fontWeight:600,color:c||theme.text}}>{v}</div>
@@ -651,10 +886,17 @@ export default function App(){
                       ))}
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <span style={{display:"inline-flex",alignItems:"center",gap:5,background:cat.color+"18",color:cat.color,border:`1px solid ${cat.color}30`,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700}}>
-                        <span style={{width:5,height:5,borderRadius:"50%",background:cat.color}}/>{cat.label}
-                      </span>
-                      <button onClick={e=>{e.stopPropagation();toggleWatch(coin.id,coin);}} style={{padding:"5px 12px",borderRadius:7,border:`1px solid ${isW?theme.accent+"50":theme.border}`,background:isW?theme.accentBg:"transparent",color:isW?theme.accentTxt:theme.textDim,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                        <span style={{display:"inline-flex",alignItems:"center",gap:4,background:sec.color+"18",color:sec.color,border:`1px solid ${sec.color}30`,borderRadius:5,padding:"2px 6px",fontSize:10,fontWeight:700}}>
+                          <span style={{width:5,height:5,borderRadius:"50%",background:sec.color}}/>{sec.label}
+                        </span>
+                        <div style={{display:"flex",gap:2,marginLeft:4}}>
+                          {[{id:"c1",met:auto.c1},{id:"c2",met:auto.c2},{id:"c3",met:auto.c3},{id:"c6",met:auto.c6}].map(({id,met})=>(
+                            <div key={id} style={{width:7,height:7,borderRadius:"50%",background:met?theme.green:theme.border}}/>
+                          ))}
+                        </div>
+                      </div>
+                      <button onClick={e=>{e.stopPropagation();toggleWatch(coin.id,coin);}} style={{padding:"5px 10px",borderRadius:7,border:`1px solid ${isW?theme.accent+"50":theme.border}`,background:isW?theme.accentBg:"transparent",color:isW?theme.accentTxt:theme.textDim,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                         {isW?"✓ Saved":"Save"}
                       </button>
                     </div>
