@@ -1,10 +1,9 @@
 import { useState, useCallback } from "react";
 
-// ── filters ────────────────────────────────────────────────────────
 const MIN_MC  = 1_000_000;
-const MAX_MC  = 50_000_000;  // raised to $50M
+const MAX_MC  = 50_000_000;
 const MIN_VOL = 400_000;
-const MAX_VOL = 7_000_000;   // capped at $7M
+const MAX_VOL = 7_000_000;
 
 const CG_CATS = [
   { id:"defi",  label:"DeFi",           cgId:"decentralized-finance-defi", color:"#6366f1" },
@@ -21,26 +20,13 @@ const SORT_OPTIONS = [
   { value:"change",  label:"24h Change"   },
 ];
 
-// ── localStorage ───────────────────────────────────────────────────
 function lsGet(key,fb){ try{ const v=localStorage.getItem(key); return v?JSON.parse(v):fb; }catch{ return fb; } }
 function lsSet(key,val){ try{ localStorage.setItem(key,JSON.stringify(val)); }catch{} }
 
-// ── shuffle ────────────────────────────────────────────────────────
-function shuffle(arr){
-  const a=[...arr];
-  for(let i=a.length-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [a[i],a[j]]=[a[j],a[i]];
-  }
-  return a;
-}
-
-// ── coin filter ────────────────────────────────────────────────────
-function qualifies(mc, vol){
+function qualifies(mc,vol){
   return mc>=MIN_MC && mc<=MAX_MC && vol>=MIN_VOL && vol<=MAX_VOL;
 }
 
-// ── theme ──────────────────────────────────────────────────────────
 function Th(dark){
   return dark?{
     bg:"#0f0f1a",bgSide:"#0a0a14",bgCard:"#13131f",bgHov:"#1a1a2e",
@@ -61,7 +47,6 @@ function Th(dark){
   };
 }
 
-// ── helpers ────────────────────────────────────────────────────────
 const fmtUSD=n=>{
   if(!n&&n!==0)return"—";
   if(n>=1e9)return"$"+(n/1e9).toFixed(2)+"B";
@@ -94,10 +79,10 @@ function projectURL(coin){
   return`https://www.coingecko.com/en/coins/${coin.rawId}`;
 }
 
-// ── API ────────────────────────────────────────────────────────────
-async function fetchCGPool(cat){
-  const pool=[];
-  for(const page of[1,2,3,4]){
+// ── simple fetchers ────────────────────────────────────────────────
+async function fetchCGCat(cat){
+  const results=[];
+  for(const page of[1,2]){
     try{
       const qs=new URLSearchParams({
         vs_currency:"usd",category:cat.cgId,
@@ -109,7 +94,7 @@ async function fetchCGPool(cat){
       const data=await res.json();
       if(!Array.isArray(data)||data.length===0) break;
       const batch=data
-        .filter(c=>qualifies(c.market_cap, c.total_volume||0))
+        .filter(c=>qualifies(c.market_cap,c.total_volume||0))
         .map(c=>({
           id:"cg_"+c.id,rawId:c.id,
           name:c.name,symbol:(c.symbol||"").toUpperCase(),
@@ -117,17 +102,17 @@ async function fetchCGPool(cat){
           vol:c.total_volume,change24h:c.price_change_percentage_24h,
           cat:cat.id,source:"CoinGecko",isNew:false,
         }));
-      pool.push(...batch);
-      await new Promise(r=>setTimeout(r,800));
+      results.push(...batch);
+      await new Promise(r=>setTimeout(r,1000));
     }catch(e){ break; }
   }
-  return pool;
+  return results;
 }
 
-async function fetchCMCPool(){
-  const pool=[];
+async function fetchCMC(){
+  const results=[];
   const now=Date.now();
-  for(const start of[1,201,401,601]){
+  for(const start of[1,201,401]){
     try{
       const qs=new URLSearchParams({
         limit:"200",start:String(start),convert:"USD",
@@ -153,11 +138,11 @@ async function fetchCMCPool(){
             cat:guessCat(c.tags||[]),source:"CMC",isNew:ageDays<=30,
           };
         });
-      pool.push(...batch);
+      results.push(...batch);
       await new Promise(r=>setTimeout(r,600));
     }catch(e){ break; }
   }
-  return pool;
+  return results;
 }
 
 function guessCat(tags){
@@ -167,19 +152,6 @@ function guessCat(tags){
   if(t.includes("meme")||t.includes("dog")||t.includes("cat"))return"meme";
   if(t.includes("layer")||t.includes("infra")||t.includes("oracle"))return"infra";
   return"other";
-}
-
-// Return all unseen coins from pool. If all seen, reset and return all.
-function getUnseen(pool, seenSet){
-  const unseen=pool.filter(c=>!seenSet.has(c.rawId));
-  if(unseen.length>0){
-    unseen.forEach(c=>seenSet.add(c.rawId));
-    return shuffle(unseen);
-  }
-  // All seen — reset this category
-  seenSet.clear();
-  pool.forEach(c=>seenSet.add(c.rawId));
-  return shuffle(pool);
 }
 
 function exportCSV(coins){
@@ -283,6 +255,7 @@ export default function App(){
   const [page,      setPage]     =useState(0);
   const [modalCoin, setModalCoin]=useState(null);
 
+  // Watchlist stores full coin objects — always persists
   const [watchMap,setWatchMapRaw]=useState(()=>new Map(lsGet("otc_watchmap",[])));
   const setWatchMap=fn=>{
     setWatchMapRaw(prev=>{
@@ -297,18 +270,6 @@ export default function App(){
     return next;
   });
 
-  const loadSeen=()=>{
-    const raw=lsGet("otc_seen3",{});
-    const out={};
-    for(const cat of CG_CATS) out[cat.id]=new Set(raw[cat.id]||[]);
-    return out;
-  };
-  const saveSeen=seenByCat=>{
-    const out={};
-    for(const cat of CG_CATS) out[cat.id]=[...seenByCat[cat.id]];
-    lsSet("otc_seen3",out);
-  };
-
   const persist=(coins,errs,alerts,ts)=>{
     setAllCoins(coins);   lsSet("otc_coins",coins);
     setErrors(errs);      lsSet("otc_errors",errs);
@@ -316,64 +277,62 @@ export default function App(){
     setLastScan(ts);      lsSet("otc_lastscan",ts?.toISOString()||null);
   };
 
+  // ── simple scan: fetch each CG category + CMC, merge, dedup ──────
   const scan=useCallback(async()=>{
     if(scanning) return;
     setScanning(true);
     setAllCoins([]); lsSet("otc_coins",[]);
     setErrors([]); setNewAlerts([]); setPage(0);
 
-    const seenByCat=loadSeen();
-    const errs=[];
-    const result=[];
-    const newOnes=[];
+    const fetched=[], errs=[];
 
-    // Fetch CMC pool once
-    setProgress("Fetching CMC pool…");
-    let cmcPool=[];
-    try{ cmcPool=await fetchCMCPool(); }
-    catch(e){ errs.push(`CMC: ${e.message}`); }
-
-    // Per category: build full pool, return all unseen
-    for(let ci=0;ci<CG_CATS.length;ci++){
-      const cat=CG_CATS[ci];
-      setProgress(`Fetching ${cat.label}… (${ci+1}/${CG_CATS.length})`);
-
-      let cgPool=[];
-      try{ cgPool=await fetchCGPool(cat); }
+    // CoinGecko — one category at a time
+    for(let i=0;i<CG_CATS.length;i++){
+      const cat=CG_CATS[i];
+      setProgress(`CoinGecko: ${cat.label} (${i+1}/${CG_CATS.length})`);
+      try{ fetched.push(...await fetchCGCat(cat)); }
       catch(e){ errs.push(`CG/${cat.label}: ${e.message}`); }
-
-      // Merge CMC coins for this category (no CG duplicate symbols)
-      const cgSymbols=new Set(cgPool.map(c=>c.symbol));
-      const cmcForCat=cmcPool.filter(c=>c.cat===cat.id&&!cgSymbols.has(c.symbol));
-      const pool=[...cgPool,...cmcForCat];
-
-      if(pool.length===0){
-        errs.push(`${cat.label}: No qualifying projects found with current filters`);
-        continue;
-      }
-
-      // Get all unseen (auto-resets if exhausted)
-      const unseen=getUnseen(pool, seenByCat[cat.id]);
-      unseen.forEach(c=>{ if(c.isNew) newOnes.push(c); });
-      result.push(...unseen);
+      if(i<CG_CATS.length-1) await new Promise(r=>setTimeout(r,1200));
     }
 
-    saveSeen(seenByCat);
-    persist(result, errs, newOnes.slice(0,10), new Date());
+    // CoinMarketCap
+    setProgress("CMC: fetching…");
+    const cgSymbols=new Set(fetched.map(c=>c.symbol));
+    try{
+      const cmcCoins=await fetchCMC();
+      const newOnes=[];
+      for(const c of cmcCoins){
+        if(cgSymbols.has(c.symbol)) continue; // dedup: CMC wins on overlap
+        fetched.push(c);
+        if(c.isNew) newOnes.push(c);
+      }
+      if(newOnes.length) persist([],errs,newOnes.slice(0,10),null);
+    }catch(e){ errs.push(`CMC: ${e.message}`); }
+
+    // Final dedup by rawId
+    const seen=new Set();
+    const final=fetched.filter(c=>{
+      if(seen.has(c.rawId)) return false;
+      seen.add(c.rawId);
+      return true;
+    });
+
+    // Collect new alerts from CG too
+    const allNew=final.filter(c=>c.isNew);
+
+    persist(final, errs, allNew.slice(0,10), new Date());
     setScanning(false);
     setProgress("");
   },[scanning]);
 
   const clearScan=()=>{
-    setAllCoins([]);   lsSet("otc_coins",[]);
-    setErrors([]);     lsSet("otc_errors",[]);
-    setNewAlerts([]);  lsSet("otc_alerts",[]);
+    setAllCoins([]); lsSet("otc_coins",[]);
+    setErrors([]); lsSet("otc_errors",[]);
+    setNewAlerts([]); lsSet("otc_alerts",[]);
     setLastScan(null); lsSet("otc_lastscan",null);
     setPage(0);
   };
   const clearWatchlist=()=>setWatchMap(new Map());
-  const resetHistory=()=>lsSet("otc_seen3",{});
-
   const watchCoins=[...watchMap.values()];
 
   const tabs=[
@@ -443,12 +402,6 @@ export default function App(){
             <span style={{fontSize:12,fontWeight:600,color:theme.textMid}}>{v}</span>
           </div>
         ))}
-        <button onClick={resetHistory} style={{width:"100%",marginTop:12,padding:"8px",borderRadius:7,border:`1px solid ${theme.border}`,background:"transparent",color:theme.textDim,fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
-          Reset scan history
-        </button>
-        <div style={{fontSize:10,color:theme.textDim,marginTop:5,lineHeight:1.5,textAlign:"center"}}>
-          Tap to see previously shown projects again
-        </div>
       </div>
     </>
   );
@@ -578,6 +531,7 @@ export default function App(){
               <strong>Notices:</strong> {errors.join(" · ")}
             </div>
           )}
+
           {newAlerts.length>0&&(
             <div style={{background:dark?"#1a0808":"#fff5f5",border:"1px solid #ef444430",borderRadius:10,padding:"14px 16px",marginBottom:16,animation:"fadeUp 0.3s ease"}}>
               <div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
@@ -634,8 +588,8 @@ export default function App(){
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke={theme.accent} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </div>
               <div style={{fontSize:16,fontWeight:600,color:theme.text,marginBottom:8}}>Ready to scan</div>
-              <div style={{fontSize:13,color:theme.textDim,maxWidth:340,margin:"0 auto",lineHeight:1.7}}>
-                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull projects from CoinGecko + CMC. Each scan returns fresh projects you haven't seen before.
+              <div style={{fontSize:13,color:theme.textDim,maxWidth:320,margin:"0 auto",lineHeight:1.7}}>
+                Click <strong style={{color:theme.accent}}>Scan now</strong> to pull live projects from CoinGecko + CMC matching your OTC criteria.
               </div>
             </div>
           )}
@@ -644,7 +598,6 @@ export default function App(){
             <div style={{textAlign:"center",padding:"60px 0",color:theme.textDim,fontSize:13}}>No saved projects — click any row then Save to Watchlist.</div>
           )}
 
-          {/* Desktop table */}
           {visible.length>0&&(
             <div className="desk-tbl" style={{background:theme.bgCard,border:`1px solid ${theme.border}`,borderRadius:12,overflow:"hidden",animation:"fadeUp 0.25s ease"}}>
               <div style={{overflowX:"auto"}}>
@@ -669,7 +622,6 @@ export default function App(){
             </div>
           )}
 
-          {/* Mobile cards */}
           {visible.length>0&&(
             <div className="mob-cards">
               {visible.map(coin=>{
